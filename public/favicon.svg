@@ -1,8 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#12141c"/>
-  <line x1="256.0" y1="200.0" x2="256.0" y2="106.0" stroke="#EDB40B" stroke-width="6" stroke-linecap="round" opacity="0.9"/><line x1="309.3" y1="238.7" x2="398.7" y2="209.6" stroke="#EDB40B" stroke-width="6" stroke-linecap="round" opacity="0.9"/><line x1="288.9" y1="301.3" x2="344.2" y2="377.4" stroke="#EDB40B" stroke-width="6" stroke-linecap="round" opacity="0.9"/><line x1="223.1" y1="301.3" x2="167.8" y2="377.4" stroke="#EDB40B" stroke-width="6" stroke-linecap="round" opacity="0.9"/><line x1="202.7" y1="238.7" x2="113.3" y2="209.6" stroke="#EDB40B" stroke-width="6" stroke-linecap="round" opacity="0.9"/>
-  <circle cx="256.0" cy="106.0" r="15" fill="#EDB40B"/><circle cx="398.7" cy="209.6" r="15" fill="#EDB40B"/><circle cx="344.2" cy="377.4" r="15" fill="#EDB40B"/><circle cx="167.8" cy="377.4" r="15" fill="#EDB40B"/><circle cx="113.3" cy="209.6" r="15" fill="#EDB40B"/>
-  <circle cx="256" cy="256" r="80" fill="none" stroke="#EDB40B" stroke-width="5" opacity="0.55"/>
-  <circle cx="256" cy="256" r="56" fill="#E30613"/>
-  <circle cx="256" cy="256" r="23.5" fill="#ffffff" opacity="0.92"/>
+  <rect width="512" height="512" rx="96" fill="#05070d"/>
+  <circle cx="256" cy="256" r="150" fill="#5eead4" opacity="0.06"/>
+  <line x1="256.0" y1="210.0" x2="256.0" y2="104.0" stroke="#22d3ee" stroke-width="6" stroke-linecap="round" opacity="0.85"/><line x1="299.7" y1="241.8" x2="400.6" y2="209.0" stroke="#34d399" stroke-width="6" stroke-linecap="round" opacity="0.85"/><line x1="283.0" y1="293.2" x2="345.3" y2="379.0" stroke="#fbbf24" stroke-width="6" stroke-linecap="round" opacity="0.85"/><line x1="229.0" y1="293.2" x2="166.7" y2="379.0" stroke="#fb7185" stroke-width="6" stroke-linecap="round" opacity="0.85"/><line x1="212.3" y1="241.8" x2="111.4" y2="209.0" stroke="#a78bfa" stroke-width="6" stroke-linecap="round" opacity="0.85"/>
+  <circle cx="256.0" cy="104.0" r="17" fill="#22d3ee"/><circle cx="400.6" cy="209.0" r="17" fill="#34d399"/><circle cx="345.3" cy="379.0" r="17" fill="#fbbf24"/><circle cx="166.7" cy="379.0" r="17" fill="#fb7185"/><circle cx="111.4" cy="209.0" r="17" fill="#a78bfa"/>
+  <circle cx="256" cy="256" r="74" fill="none" stroke="#5eead4" stroke-width="4" opacity="0.5"/>
+  <circle cx="256" cy="256" r="46" fill="#5eead4"/>
+  <circle cx="256" cy="256" r="19.3" fill="#05070d" opacity="0.85"/>
 </svg>

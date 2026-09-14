@@ -18,8 +18,8 @@ export default defineConfig({
         short_name: 'NeurALE',
         description:
           'Plataforma modular de operaciones de CD NNEO (VIDRI): un núcleo neuronal que conecta cada módulo del centro de distribución.',
-        theme_color: '#12141c',
-        background_color: '#12141c',
+        theme_color: '#05070d',
+        background_color: '#05070d',
         display: 'standalone',
         start_url: '/',
         icons: [

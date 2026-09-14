@@ -3,14 +3,20 @@
 /*
   Tokens de diseño de NeurALE (ver ARCHITECTURE.md → "Diseño visual").
   Tailwind v4 usa configuración basada en CSS (@theme) en vez de tailwind.config.js:
-  cada --color-neurale-* genera las utilidades bg-neurale-*, text-neurale-*, border-neurale-*, etc.
+  cada --color-neurale-* genera las utilidades bg-neurale-*, text-neurale-*, etc.
+
+  Dirección visual: espacio profundo + tejido neuronal luminoso. El fondo es casi
+  negro y todo el color vive en los acentos (cada módulo tiene el suyo, definido en
+  src/shared/modules.ts).
 */
 @theme {
-  --color-neurale-bg: #12141c;
-  --color-neurale-surface: rgba(22, 26, 38, 0.72);
-  --color-neurale-border: rgba(255, 255, 255, 0.1);
+  --color-neurale-bg: #05070d;
+  --color-neurale-deep: #0a0f1c;
+  --color-neurale-surface: rgba(12, 18, 32, 0.66);
+  --color-neurale-border: rgba(255, 255, 255, 0.09);
   --color-neurale-red: #e30613;
   --color-neurale-gold: #edb40b;
+  --color-neurale-mind: #5eead4;
 
   /* IBM Plex Sans es la tipografía base (texto general). */
   --font-sans: 'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif;
@@ -29,48 +35,128 @@ body,
 
 body {
   @apply bg-neurale-bg text-white/90 antialiased;
-  background-image:
-    radial-gradient(circle at 18% 8%, rgba(227, 6, 19, 0.1), transparent 42%),
-    radial-gradient(circle at 88% 88%, rgba(237, 180, 11, 0.07), transparent 45%);
-  background-repeat: no-repeat;
-  background-attachment: fixed;
 }
 
 ::selection {
-  background: rgba(227, 6, 19, 0.35);
+  background: rgba(94, 234, 212, 0.3);
 }
 
-/* Scrollbar discreto, a tono con el look "centro de mando". */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
 }
 
-/* Línea de conexión con pulso animado (Núcleo Neuronal y afines). */
-@keyframes neural-pulse {
-  0% {
+/* ---------------------------------------------------------------- *
+ * Animaciones compartidas del lenguaje visual neuronal
+ * ---------------------------------------------------------------- */
+
+/* Parpadeo de las estrellas del fondo. */
+@keyframes star-twinkle {
+  0%,
+  100% {
+    opacity: var(--star-min, 0.25);
+  }
+  50% {
+    opacity: var(--star-max, 0.9);
+  }
+}
+
+.star {
+  animation: star-twinkle var(--dur, 4s) ease-in-out infinite;
+  animation-delay: var(--delay, 0s);
+}
+
+/* Impulso que viaja por la vía neuronal (dash recorriendo el trazo). */
+@keyframes spine-travel {
+  from {
+    stroke-dashoffset: var(--travel, 320);
+  }
+  to {
     stroke-dashoffset: 0;
-    opacity: 0.35;
+  }
+}
+
+.spine-pulse {
+  animation: spine-travel var(--dur, 3.2s) linear infinite;
+  animation-delay: var(--delay, 0s);
+}
+
+/* Latido de un cuerpo neuronal (nodo de módulo / nodo destacado del cerebro). */
+@keyframes soma-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.25);
+  }
+}
+
+.soma-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: soma-pulse var(--dur, 3s) ease-in-out infinite;
+  animation-delay: var(--delay, 0s);
+}
+
+/* Respiración del cerebro completo. */
+@keyframes mind-breathe {
+  0%,
+  100% {
+    opacity: 0.85;
   }
   50% {
     opacity: 1;
   }
+}
+
+.mind-breathe {
+  animation: mind-breathe 6s ease-in-out infinite;
+}
+
+/* Halo que late detrás de un nodo. */
+@keyframes halo-pulse {
+  0%,
   100% {
-    stroke-dashoffset: -28;
     opacity: 0.35;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(1.12);
   }
 }
 
-.neural-pulse-line {
-  stroke-dasharray: 6 10;
-  animation: neural-pulse 2.6s linear infinite;
+.halo-pulse {
+  animation: halo-pulse var(--dur, 4s) ease-in-out infinite;
+  animation-delay: var(--delay, 0s);
+}
+
+/* Deriva lentísima del tejido neuronal de fondo en las pantallas de módulo. */
+@keyframes field-drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1.04);
+  }
+  50% {
+    transform: translate3d(-1.5%, 1.5%, 0) scale(1.09);
+  }
+}
+
+.field-drift {
+  /* Se promueve a capa propia para que el filtro de desenfoque no se rasterice
+     en cada frame mientras el tejido deriva. */
+  will-change: transform;
+  animation: field-drift 26s ease-in-out infinite;
 }
 
 /* Transición de entrada compartida: fundido + escala (hub -> detalle de módulo). */
 @keyframes neural-enter {
   from {
     opacity: 0;
-    transform: scale(0.96) translateY(6px);
+    transform: scale(0.97) translateY(8px);
   }
   to {
     opacity: 1;
@@ -82,24 +168,22 @@ body {
   animation: neural-enter 0.55s var(--ease-neural) both;
 }
 
-/* Resplandor pulsante del núcleo central (Núcleo Neuronal). */
-@keyframes core-glow {
-  0%,
-  100% {
-    box-shadow: 0 0 40px 6px rgba(227, 6, 19, 0.35);
-  }
-  50% {
-    box-shadow: 0 0 64px 14px rgba(227, 6, 19, 0.55);
-  }
-}
-
-.neural-core-glow {
-  animation: core-glow 3.2s ease-in-out infinite;
-}
-
 /* Si el navegador soporta la View Transitions API, usamos el mismo easing/duración. */
 ::view-transition-old(root),
 ::view-transition-new(root) {
   animation-duration: 0.5s;
   animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Respeta a quien pide menos movimiento. */
+@media (prefers-reduced-motion: reduce) {
+  .star,
+  .spine-pulse,
+  .soma-pulse,
+  .mind-breathe,
+  .halo-pulse,
+  .field-drift,
+  .neural-enter {
+    animation: none !important;
+  }
 }
