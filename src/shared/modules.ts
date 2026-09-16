@@ -17,7 +17,7 @@ export type ModuleId =
   | 'outbound'
   | 'inventory'
 
-export type AnyModuleId = ModuleId | 'dashboard'
+export type AnyModuleId = ModuleId | 'dashboard' | 'admin'
 
 export interface ModuleDef<Id extends AnyModuleId = AnyModuleId> {
   id: Id
@@ -28,6 +28,11 @@ export interface ModuleDef<Id extends AnyModuleId = AnyModuleId> {
   description: string
   /** Color de acento del módulo (hex). Tiñe su nodo en el hub y su pantalla interna. */
   color: string
+  /**
+   * `false` mientras la sección todavía no tiene ruta ni pantalla: se muestra en el
+   * Núcleo Neuronal pero no navega. Distinto de "sin acceso" (que dependerá del rol).
+   */
+  available?: boolean
 }
 
 /** Los 5 módulos de negocio que cuelgan de la vía neuronal, de arriba hacia abajo. */
@@ -89,7 +94,33 @@ export const DASHBOARD_MODULE: ModuleDef<'dashboard'> = {
   color: '#5eead4',
 }
 
-export const ALL_MODULES: ModuleDef<AnyModuleId>[] = [...MODULES, DASHBOARD_MODULE]
+/**
+ * Configuraciones y Administradores: el hemisferio IZQUIERDO del cerebro.
+ * Gestión de administradores y usuarios, catálogos compartidos y configuración
+ * general de la plataforma.
+ *
+ * `path` es provisional: lo define el chat de Configuraciones y Administradores.
+ * Mientras `available` sea false, el hemisferio izquierdo se ve y responde al hover
+ * pero no navega — cuando ese chat cree su ruta, basta poner `available: true` (y
+ * ajustar `path` si eligió otro) para cablearlo.
+ */
+export const ADMIN_SECTION: ModuleDef<'admin'> = {
+  id: 'admin',
+  path: '/admin',
+  label: 'Configuraciones y Administradores',
+  tagline: 'Corteza · Administración',
+  description:
+    'Gestión de administradores y usuarios, catálogos compartidos y configuración general de la plataforma.',
+  // Turquesa más profundo que el del Dashboard: mismo órgano, dos intensidades.
+  color: '#14b8a6',
+  available: false,
+}
+
+export const ALL_MODULES: ModuleDef<AnyModuleId>[] = [
+  ...MODULES,
+  DASHBOARD_MODULE,
+  ADMIN_SECTION,
+]
 
 /** Convierte un color hex del registro a rgba con la opacidad indicada. */
 export function withAlpha(hex: string, alpha: number): string {

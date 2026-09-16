@@ -152,6 +152,25 @@ body {
   animation: field-drift 26s ease-in-out infinite;
 }
 
+/* Hemisferios clicables del cerebro (BrainCore). El desplazamiento lateral es lo
+   que abre la fisura y comunica que son dos mitades independientes. */
+.hemi {
+  outline: none;
+  transition:
+    transform 0.5s var(--ease-neural),
+    opacity 0.45s var(--ease-neural);
+}
+
+.hemi-ring {
+  opacity: 0;
+  transition: opacity 0.18s linear;
+}
+
+/* Solo con navegación por teclado, no al hacer clic. */
+.hemi:focus-visible .hemi-ring {
+  opacity: 0.9;
+}
+
 /* Transición de entrada compartida: fundido + escala (hub -> detalle de módulo). */
 @keyframes neural-enter {
   from {
@@ -185,5 +204,10 @@ body {
   .field-drift,
   .neural-enter {
     animation: none !important;
+  }
+
+  /* El hemisferio sigue apartándose del eje, pero sin animar el movimiento. */
+  .hemi {
+    transition: opacity 0.2s linear;
   }
 }
