@@ -113,7 +113,7 @@ export const ADMIN_SECTION: ModuleDef<'admin'> = {
     'Gestión de administradores y usuarios, catálogos compartidos y configuración general de la plataforma.',
   // Turquesa más profundo que el del Dashboard: mismo órgano, dos intensidades.
   color: '#14b8a6',
-  available: false,
+  available: true,
 }
 
 export const ALL_MODULES: ModuleDef<AnyModuleId>[] = [
