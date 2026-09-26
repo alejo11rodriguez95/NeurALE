@@ -223,6 +223,11 @@ export function GoalsDialog({
                 <td className="p-1.5 text-white/80">{PROCESSES.find((x) => x.id === p.id)?.nombre}</td>
                 {cols.map(([k]) => (
                   <td key={k} className="p-1.5">
+                    {p.id === 'rec' && k === 'metaProd' ? (
+                      <span className="block px-1 text-xs text-white/45" title="Pallets aprox. plan ÷ dotación plan">
+                        Automática (pallets plan ÷ dotación)
+                      </span>
+                    ) : (
                     <input
                       value={String(p[k])}
                       inputMode={k === 'unidad' ? 'text' : 'decimal'}
@@ -234,6 +239,7 @@ export function GoalsDialog({
                       className={`${fieldClass} tabular-nums`}
                       style={ringStyle(MIND)}
                     />
+                    )}
                   </td>
                 ))}
               </tr>
@@ -243,6 +249,7 @@ export function GoalsDialog({
         <div className="mt-4 flex flex-wrap gap-4">
           {(
             [
+              ['palletsPerContainer', 'Pallets promedio por contenedor (Inbound)'],
               ['frSuc', 'Meta fill rate sucursales %'],
               ['s5', 'Meta 5S %'],
               ['preop', 'Meta pre-operacional %'],
@@ -311,9 +318,12 @@ export function HistoryDialog({
     ]
     PROCESSES.forEach((p) =>
       head.push(
-        `${p.nombre} vol. plan`, `${p.nombre} vol. real`, `${p.nombre} horas-hombre`, `${p.nombre} dotación plan`,
+        `${p.nombre} ${p.containers ? 'contenedores plan' : 'vol. plan'}`,
+        `${p.nombre} ${p.containers ? 'contenedores reales' : 'vol. real'}`,
+        `${p.nombre} ${p.containers ? 'pallets aprox. reales' : 'horas-hombre'}`,
+        `${p.nombre} dotación plan`,
         `${p.nombre} presentes`, `${p.nombre} ${p.transport ? 'camiones plan' : 'montacargas plan'}`,
-        `${p.nombre} ${p.transport ? 'camiones disp.' : 'montacargas op.'}`, `${p.nombre} errores`,
+        `${p.nombre} ${p.transport ? 'camiones disp.' : 'montacargas op.'}`, `${p.nombre} ${p.err}`,
       ),
     )
     head.push('Compromiso 1', 'Compromiso 2', 'Compromiso 3', 'Observaciones housekeeping')
@@ -330,9 +340,12 @@ export function HistoryDialog({
         x.fillRate?.shortage_cause, b.safety.lti, b.safety.incidents, b.safety.nearMisses, b.safety.unsafeActs,
         x.shift?.audit_5s, x.shift?.preop_done, x.shift?.preop_in_use,
       ]
-      PROCESSES.forEach((p) => {
-        const d = x.processes[p.id]
-        row.push(d?.vol_plan, d?.vol_real, d?.hh_direct, d?.staff_plan, d?.staff_present, d?.equip_plan, d?.equip_available, d?.errors)
+      b.rows.forEach((r) => {
+        const d = r.data
+        row.push(
+          d?.vol_plan, d?.vol_real, r.inbound ? r.inbound.palletsReal : d?.hh_direct,
+          d?.staff_plan, d?.staff_present, d?.equip_plan, d?.equip_available, r.errors,
+        )
       })
       ;(x.shift?.commitments ?? []).forEach((c) => row.push([c.problem, c.owner, c.due].filter(Boolean).join(' | ')))
       if (!x.shift) row.push('', '', '')

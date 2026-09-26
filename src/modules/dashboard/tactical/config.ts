@@ -12,24 +12,58 @@ export type ShiftId = 'A' | 'B'
 
 export interface ProcessDef {
   id: ProcessId
+  /** Nombre que se muestra en el tablero (= nombre del módulo en NeurALE). */
   nombre: string
-  /** Etiqueta del indicador de calidad de este proceso. */
+  /** Etiqueta del indicador de calidad de esta fila. */
   err: string
   /** Módulo de NeurALE que llena esta fila del diálogo. */
   module: ModuleId
-  /** Despacho usa "camiones" en vez de "montacargas". */
+  /**
+   * Si el indicador de calidad lo llena OTRO módulo, métrica de
+   * `dashboard_tactical_quality` de la que sale. Sin esto, sale de
+   * `dashboard_tactical_process.errors` (lo llena el propio módulo).
+   */
+  quality?: QualityMetric
+  /** Outbound usa "camiones" en vez de "montacargas". */
   transport?: boolean
+  /** Inbound: volumen en contenedores + pallets aprox.; productividad por persona. */
+  containers?: boolean
 }
 
+export type QualityMetric = 'pic_rejections' | 'alm_wrong_locations' | 'des_branch_inconsistencies'
+
+export const QUALITY_METRICS: { id: QualityMetric; label: string; module: ModuleId; row: ProcessId }[] = [
+  { id: 'pic_rejections', label: 'Rechazos a Picking', module: 'outbound', row: 'pic' },
+  { id: 'alm_wrong_locations', label: 'Ubicaciones erróneas (Storage)', module: 'inventory', row: 'alm' },
+  { id: 'des_branch_inconsistencies', label: 'Inconsistencias en sucursales (Outbound)', module: 'inventory', row: 'des' },
+]
+
 export const PROCESSES: ProcessDef[] = [
-  { id: 'rec', nombre: 'Recepción', err: 'Diferencias vs. OC', module: 'inbound' },
-  { id: 'alm', nombre: 'Almacenamiento', err: 'Ubicaciones erróneas', module: 'storage' },
-  { id: 'pic', nombre: 'Picking', err: 'Errores de picking', module: 'picking' },
-  { id: 'des', nombre: 'Despacho', err: 'Rechazos', module: 'outbound', transport: true },
+  { id: 'rec', nombre: 'Inbound', err: 'Diferencias vs. OC', module: 'inbound', containers: true },
+  { id: 'alm', nombre: 'Storage', err: 'Ubicaciones erróneas', module: 'storage', quality: 'alm_wrong_locations' },
+  { id: 'pic', nombre: 'Picking', err: 'Rechazos de Outbound', module: 'picking', quality: 'pic_rejections' },
+  {
+    id: 'des',
+    nombre: 'Outbound',
+    err: 'Inconsistencias en sucursales',
+    module: 'outbound',
+    quality: 'des_branch_inconsistencies',
+    transport: true,
+  },
 ]
 
 export function processForModule(module: string | null | undefined): ProcessDef | undefined {
   return PROCESSES.find((p) => p.module === module)
+}
+
+/** Métricas de calidad cruzadas que llena este módulo (p. ej. Inventory → 2). */
+export function qualityMetricsForModule(module: string | null | undefined) {
+  return QUALITY_METRICS.filter((q) => q.module === module)
+}
+
+/** Módulos que tienen opción "Diálogo Táctico" (llenan una fila o una métrica). */
+export function hasTacticalOption(module: string | null | undefined): boolean {
+  return !!processForModule(module) || qualityMetricsForModule(module).length > 0
 }
 
 export const SHIFTS: { id: ShiftId; hours: string }[] = [
@@ -48,17 +82,17 @@ export interface ProcessGoal {
 
 export interface Goals {
   procesos: ProcessGoal[]
-  g: { frSuc: number; s5: number; preop: number }
+  g: { frSuc: number; s5: number; preop: number; palletsPerContainer: number }
 }
 
 export const DEFAULT_GOALS: Goals = {
   procesos: [
-    { id: 'rec', unidad: 'pallets', metaProd: 6, metaErr: 0, dot: 8, mc: 3 },
+    { id: 'rec', unidad: 'contenedores', metaProd: 0, metaErr: 0, dot: 8, mc: 3 },
     { id: 'alm', unidad: 'ubicaciones', metaProd: 10, metaErr: 0, dot: 6, mc: 4 },
     { id: 'pic', unidad: 'líneas', metaProd: 45, metaErr: 2, dot: 18, mc: 3 },
     { id: 'des', unidad: 'pallets', metaProd: 8, metaErr: 0, dot: 10, mc: 3 },
   ],
-  g: { frSuc: 90, s5: 90, preop: 100 },
+  g: { frSuc: 90, s5: 90, preop: 100, palletsPerContainer: 45 },
 }
 
 /** Mezcla las metas guardadas con los valores por defecto (tolera jsonb incompleto). */

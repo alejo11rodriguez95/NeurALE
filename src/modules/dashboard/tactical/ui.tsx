@@ -29,6 +29,7 @@ export function Cell({
   onClick,
   className = '',
   big,
+  compact,
 }: {
   status: Status
   label: ReactNode
@@ -37,6 +38,7 @@ export function Cell({
   onClick?: () => void
   className?: string
   big?: boolean
+  compact?: boolean
 }) {
   const c = STATUS_COLOR[status]
   const Tag = onClick ? 'button' : 'div'
@@ -58,8 +60,12 @@ export function Cell({
       />
       <span className="pr-4 text-[11px] leading-tight text-white/55">{label}</span>
       <span
-        className={`font-display leading-none font-semibold tabular-nums ${
-          big ? 'text-[clamp(2.2rem,5vh,3.4rem)]' : 'text-[clamp(1.35rem,3.1vh,2.1rem)]'
+        className={`font-display leading-none font-semibold tabular-nums ${compact ? 'whitespace-nowrap' : ''} ${
+          big
+            ? 'text-[clamp(2.2rem,5vh,3.4rem)]'
+            : compact
+              ? 'text-[clamp(1.1rem,2.4vh,1.6rem)]'
+              : 'text-[clamp(1.35rem,3.1vh,2.1rem)]'
         }`}
         style={{ color: status === 'na' ? 'rgba(255,255,255,0.45)' : c }}
       >

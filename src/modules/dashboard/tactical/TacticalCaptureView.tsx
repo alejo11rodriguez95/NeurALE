@@ -4,23 +4,38 @@ import { useAuth } from '@/shared/auth/AuthContext'
 import { GlassCard } from '@/shared/components/GlassCard'
 import { MODULES, type ModuleId } from '@/shared/modules'
 
-import { saveFillRate, saveProcess, saveSafety, type ProcessRow } from './api'
-import { SHORTAGE_CAUSES, SHIFTS, currentShiftSV, goalFor, processForModule, todaySV, type ShiftId } from './config'
-import { computeBoard, fmt, isNum, pct, stLimit, stRatio } from './metrics'
+import { saveFillRate, saveProcess, saveQuality, saveSafety, type ProcessRow, type QualityRow } from './api'
+import {
+  SHORTAGE_CAUSES,
+  SHIFTS,
+  currentShiftSV,
+  goalFor,
+  processForModule,
+  qualityMetricsForModule,
+  todaySV,
+  type ProcessDef,
+  type QualityMetric,
+  type ShiftId,
+} from './config'
+import { computeBoard, fmt, inboundCalc, isNum, pct, stLimit, stRatio } from './metrics'
 import { Button, Cell, Ratio, ShiftPicker, fieldClass, ringStyle } from './ui'
 import { useTactical } from './useTactical'
 
 /**
- * Opción "Diálogo Táctico" dentro de un módulo (Inbound, Storage, Picking,
- * Outbound): el jefe de área llena la fila de su proceso para el turno.
- * Picking además llena Fill Rate + causa del faltante. Cualquier jefe puede
- * registrar los incidentes / casi accidentes / actos inseguros del turno.
+ * Opción "Diálogo Táctico" dentro de un módulo: el jefe de área llena la fila
+ * de su proceso para el turno (Inbound, Storage, Picking, Outbound).
+ * Picking además llena Fill Rate + causa del faltante. Algunos indicadores de
+ * calidad los llena otro módulo (ver `QUALITY_METRICS`): Outbound → rechazos a
+ * Picking; Inventory → ubicaciones erróneas (Storage) e inconsistencias en
+ * sucursales (Outbound). Cualquier jefe puede registrar los incidentes / casi
+ * accidentes / actos inseguros del turno.
  * Lo que se guarda aparece al instante en el tablero del Dashboard Neuronal.
  */
 export function TacticalCaptureView({ moduleId }: { moduleId: ModuleId }) {
   const { adminUser } = useAuth()
   const mod = MODULES.find((m) => m.id === moduleId)!
   const proc = processForModule(moduleId)
+  const qMetrics = qualityMetricsForModule(moduleId)
   const color = mod.color
   const isManager = adminUser?.access_level === 'admin' || adminUser?.access_level === 'gerencia'
   const canEdit = isManager || (adminUser?.access_level === 'jefe_area' && adminUser.module === moduleId)
@@ -38,15 +53,15 @@ export function TacticalCaptureView({ moduleId }: { moduleId: ModuleId }) {
     )
   }
 
-  if (!proc) return null
+  if (!proc && qMetrics.length === 0) return null
 
   return (
     <div className="flex flex-col gap-5">
       <GlassCard className="flex flex-wrap items-end justify-between gap-4 p-5">
         <div>
-          <h2 className="font-display text-xl font-semibold text-white">Diálogo Táctico · {proc.nombre}</h2>
+          <h2 className="font-display text-xl font-semibold text-white">Diálogo Táctico · {mod.label}</h2>
           <p className="mt-1 max-w-xl text-sm text-white/55">
-            Captura los datos de tu proceso para el turno. Se reflejan al instante en el tablero del Dashboard
+            Captura los datos de {mod.label} para el turno. Se reflejan al instante en el tablero del Dashboard
             Neuronal.
           </p>
         </div>
@@ -58,18 +73,33 @@ export function TacticalCaptureView({ moduleId }: { moduleId: ModuleId }) {
         <p className="text-sm text-white/45">{error ? '' : 'Cargando…'}</p>
       ) : (
         <>
-          <ProcessForm
-            key={`p-${date}-${shift}`}
-            row={data.processes[proc.id]}
-            goal={goalFor(settings.goals, proc.id)}
-            transport={!!proc.transport}
-            errLabel={proc.err}
-            color={color}
-            onSave={async (v) => {
-              await saveProcess({ shift_date: date, shift, process_id: proc.id }, v)
-              reload()
-            }}
-          />
+          {proc ? (
+            <ProcessForm
+              key={`p-${date}-${shift}`}
+              def={proc}
+              row={data.processes[proc.id]}
+              goal={goalFor(settings.goals, proc.id)}
+              palletsPerContainer={settings.goals.g.palletsPerContainer}
+              color={color}
+              onSave={async (v) => {
+                await saveProcess({ shift_date: date, shift, process_id: proc.id }, v)
+                reload()
+              }}
+            />
+          ) : null}
+          {qMetrics.length ? (
+            <QualityForm
+              key={`q-${date}-${shift}`}
+              metrics={qMetrics.map((m) => ({ ...m, max: goalFor(settings.goals, m.row).metaErr }))}
+              rows={data.quality}
+              color={color}
+              onSave={async (vals) => {
+                for (const [metric, value] of Object.entries(vals))
+                  await saveQuality({ shift_date: date, shift }, metric as QualityMetric, value)
+                reload()
+              }}
+            />
+          ) : null}
           {moduleId === 'picking' ? (
             <FillRateForm
               key={`f-${date}-${shift}`}
@@ -192,20 +222,33 @@ const hhmm = (iso?: string) =>
 /* ---------- Fila del proceso ---------- */
 
 function ProcessForm({
+  def,
   row,
   goal,
-  transport,
-  errLabel,
+  palletsPerContainer,
   color,
   onSave,
 }: {
+  def: ProcessDef
   row: ProcessRow | undefined
   goal: ReturnType<typeof goalFor>
-  transport: boolean
-  errLabel: string
+  palletsPerContainer: number
   color: string
   onSave: (v: Partial<ProcessRow>) => Promise<void>
 }) {
+  const containers = !!def.containers
+  // El indicador de calidad solo se captura aquí si lo llena el propio módulo.
+  const ownErrors = !def.quality
+  const keys = [
+    'vol_plan',
+    'vol_real',
+    ...(containers ? [] : ['hh_direct']),
+    'staff_plan',
+    'staff_present',
+    'equip_plan',
+    'equip_available',
+    ...(ownErrors ? ['errors'] : []),
+  ] as const
   const [v, setV] = useState<Vals>(() => ({
     vol_plan: toStr(row?.vol_plan),
     vol_real: toStr(row?.vol_real),
@@ -225,12 +268,20 @@ function ProcessForm({
     }
   }
   const { busy, save, status } = useSave(() =>
-    onSave(Object.fromEntries(Object.entries(v).map(([k, s]) => [k, toNum(s)])) as Partial<ProcessRow>),
+    onSave(Object.fromEntries(keys.map((k) => [k, toNum(v[k])])) as Partial<ProcessRow>),
   )
 
-  const prod = isNum(n('vol_real')) && isNum(n('hh_direct')) && n('hh_direct')! > 0 ? n('vol_real')! / n('hh_direct')! : null
+  const inbound = containers
+    ? inboundCalc(n('vol_plan'), n('vol_real'), n('staff_present'), n('staff_plan'), palletsPerContainer)
+    : null
+  const prod = inbound
+    ? inbound.perPerson
+    : isNum(n('vol_real')) && isNum(n('hh_direct')) && n('hh_direct')! > 0
+      ? n('vol_real')! / n('hh_direct')!
+      : null
+  const metaProd = inbound ? inbound.metaPerPerson : goal.metaProd
   const u = goal.unidad
-  const eq = transport ? 'Camiones' : 'Montacargas'
+  const eq = def.transport ? 'Camiones' : 'Montacargas'
 
   return (
     <Section
@@ -246,28 +297,119 @@ function ProcessForm({
       }
     >
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <Field label={`Volumen plan (${u})`} value={v.vol_plan} onChange={set('vol_plan')} color={color} />
-        <Field label={`Volumen real (${u})`} value={v.vol_real} onChange={set('vol_real')} color={color} />
-        <Field label="Horas-hombre trabajadas" value={v.hh_direct} onChange={set('hh_direct')} color={color} />
-        <Field label={errLabel} value={v.errors} onChange={set('errors')} color={color} />
+        {containers ? (
+          <>
+            <Field label="Contenedores proyectados a recibir" value={v.vol_plan} onChange={set('vol_plan')} color={color} />
+            <Field label="Contenedores recibidos" value={v.vol_real} onChange={set('vol_real')} color={color} />
+          </>
+        ) : (
+          <>
+            <Field label={`Volumen plan (${u})`} value={v.vol_plan} onChange={set('vol_plan')} color={color} />
+            <Field label={`Volumen real (${u})`} value={v.vol_real} onChange={set('vol_real')} color={color} />
+            <Field label="Horas-hombre trabajadas" value={v.hh_direct} onChange={set('hh_direct')} color={color} />
+          </>
+        )}
+        {ownErrors ? <Field label={def.err} value={v.errors} onChange={set('errors')} color={color} /> : null}
         <Field label="Dotación plan" value={v.staff_plan} onChange={set('staff_plan')} color={color} />
         <Field label="Presentes hoy" value={v.staff_present} onChange={set('staff_present')} color={color} />
         <Field label={`${eq} plan`} value={v.equip_plan} onChange={set('equip_plan')} color={color} />
-        <Field label={`${eq} ${transport ? 'disponibles' : 'operativos'}`} value={v.equip_available} onChange={set('equip_available')} color={color} />
+        <Field label={`${eq} ${def.transport ? 'disponibles' : 'operativos'}`} value={v.equip_available} onChange={set('equip_available')} color={color} />
       </div>
+      {!ownErrors ? (
+        <p className="mt-3 text-xs text-white/40">
+          "{def.err}" no se captura aquí: lo llena{' '}
+          {def.quality === 'pic_rejections' ? 'Outbound' : 'Inventory'} desde su opción Diálogo Táctico.
+        </p>
+      ) : null}
 
       <p className="mt-5 mb-2 text-[11px] tracking-[0.18em] text-white/40 uppercase">Así se verá en el tablero</p>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+      <div className={`grid grid-cols-2 gap-2 ${containers ? 'sm:grid-cols-6' : ownErrors ? 'sm:grid-cols-5' : 'sm:grid-cols-4'}`}>
         <Cell
           status={stRatio(n('vol_real'), n('vol_plan'))}
-          label="Real / plan"
+          label={containers ? 'Contenedores' : 'Real / plan'}
           value={<Ratio a={fmt(n('vol_real'))} b={fmt(n('vol_plan'))} />}
           meta={pct(n('vol_real'), n('vol_plan')) === null ? 'Sin dato' : `${fmt(pct(n('vol_real'), n('vol_plan')))}% del plan`}
         />
-        <Cell status={stRatio(prod, goal.metaProd)} label={`${u} por HH`} value={fmt(prod)} meta={`Meta ${fmt(goal.metaProd)}`} />
+        {inbound ? (
+          <Cell
+            status={stRatio(inbound.palletsReal, inbound.palletsPlan)}
+            label="Pallets aprox."
+            value={<Ratio a={fmt(inbound.palletsReal)} b={fmt(inbound.palletsPlan)} />}
+            meta={`${fmt(palletsPerContainer)} por contenedor`}
+          />
+        ) : null}
+        <Cell
+          status={stRatio(prod, metaProd)}
+          label={containers ? 'Pallets por persona' : `${u} por HH`}
+          value={fmt(prod)}
+          meta={`Meta ${fmt(metaProd)}`}
+        />
         <Cell status={stRatio(n('staff_present'), n('staff_plan'))} label="Presentes / plan" value={<Ratio a={fmt(n('staff_present'))} b={fmt(n('staff_plan'))} />} />
         <Cell status={stRatio(n('equip_available'), n('equip_plan'))} label={`${eq} / plan`} value={<Ratio a={fmt(n('equip_available'))} b={fmt(n('equip_plan'))} />} />
-        <Cell status={stLimit(n('errors'), goal.metaErr)} label={errLabel} value={fmt(n('errors'))} meta={`Máximo ${goal.metaErr}`} />
+        {ownErrors ? (
+          <Cell status={stLimit(n('errors'), goal.metaErr)} label={def.err} value={fmt(n('errors'))} meta={`Máximo ${goal.metaErr}`} />
+        ) : null}
+      </div>
+    </Section>
+  )
+}
+
+/* ---------- Calidad cruzada (Outbound → Picking; Inventory → Storage/Outbound) ---------- */
+
+function QualityForm({
+  metrics,
+  rows,
+  color,
+  onSave,
+}: {
+  metrics: { id: QualityMetric; label: string; max: number }[]
+  rows: Partial<Record<QualityMetric, QualityRow>>
+  color: string
+  onSave: (vals: Partial<Record<QualityMetric, number | null>>) => Promise<void>
+}) {
+  const [v, setV] = useState<Vals>(() => Object.fromEntries(metrics.map((m) => [m.id, toStr(rows[m.id]?.value)])))
+  const { busy, save, status } = useSave(() =>
+    onSave(Object.fromEntries(metrics.map((m) => [m.id, toNum(v[m.id])]))),
+  )
+  const last = metrics
+    .map((m) => rows[m.id]?.updated_at)
+    .filter(Boolean)
+    .sort()
+    .pop()
+  const n = (k: string) => {
+    try {
+      return toNum(v[k])
+    } catch {
+      return null
+    }
+  }
+
+  return (
+    <Section
+      title={metrics.length > 1 ? 'Indicadores de calidad que audita tu área' : 'Indicador de calidad que audita tu área'}
+      subtitle={last ? `Última actualización: ${hhmm(last)}` : 'Aparecen en la columna Calidad de la fila correspondiente del tablero.'}
+      footer={
+        <>
+          {status}
+          <Button primary color={color} onClick={save} disabled={busy}>
+            {busy ? 'Guardando…' : 'Guardar calidad'}
+          </Button>
+        </>
+      }
+    >
+      <div className={`grid grid-cols-1 gap-3 ${metrics.length > 1 ? 'sm:grid-cols-[1fr_1fr_0.8fr_0.8fr]' : 'sm:grid-cols-[1fr_0.8fr]'}`}>
+        {metrics.map((m) => (
+          <Field key={m.id} label={m.label} value={v[m.id]} onChange={(x) => setV((p) => ({ ...p, [m.id]: x }))} color={color} />
+        ))}
+        {metrics.map((m) => (
+          <Cell
+            key={`c-${m.id}`}
+            status={stLimit(n(m.id), m.max)}
+            label={m.label}
+            value={fmt(n(m.id))}
+            meta={`Máximo ${m.max}`}
+          />
+        ))}
       </div>
     </Section>
   )

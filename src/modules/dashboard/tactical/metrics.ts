@@ -1,5 +1,5 @@
 import type { TacticalData, Settings } from './api'
-import { HK, PROCESSES, daysBetween, goalFor, type HkValue } from './config'
+import { HK, PROCESSES, QUALITY_METRICS, daysBetween, goalFor, type HkValue } from './config'
 
 /**
  * Semáforos y resumen del Diálogo Táctico — misma lógica que el HTML original:
@@ -95,6 +95,30 @@ export function ltiDays(settings: Settings | null, asOf: string): number | null 
   return d >= 0 ? d : null
 }
 
+/* ---------- Inbound: contenedores → pallets aprox. ---------- */
+
+/**
+ * Inbound mide volumen en contenedores. Pallets aprox. = contenedores ×
+ * pallets promedio por contenedor (meta global, 45 por defecto).
+ * Productividad = pallets aprox. reales ÷ personas presentes.
+ * Meta de productividad = pallets aprox. plan ÷ dotación plan (pallets
+ * promedio a recibir por persona).
+ */
+export function inboundCalc(
+  contPlan: number | null | undefined,
+  contReal: number | null | undefined,
+  present: number | null | undefined,
+  staffPlan: number | null | undefined,
+  palletsPerContainer: number,
+) {
+  const palletsPlan = isNum(contPlan) ? Number(contPlan) * palletsPerContainer : null
+  const palletsReal = isNum(contReal) ? Number(contReal) * palletsPerContainer : null
+  const perPerson = palletsReal !== null && isNum(present) && Number(present) > 0 ? palletsReal / Number(present) : null
+  const metaPerPerson =
+    palletsPlan !== null && isNum(staffPlan) && Number(staffPlan) > 0 ? palletsPlan / Number(staffPlan) : null
+  return { palletsPlan, palletsReal, perPerson, metaPerPerson }
+}
+
 /* ---------- Tablero completo ---------- */
 
 export function computeBoard(data: TacticalData, settings: Settings, date: string) {
@@ -106,19 +130,47 @@ export function computeBoard(data: TacticalData, settings: Settings, date: strin
     const d = data.processes[p.id]
     const staffPlan = isNum(d?.staff_plan) ? d!.staff_plan! : g.dot
     const equipPlan = isNum(d?.equip_plan) ? d!.equip_plan! : g.mc
-    const prod =
-      isNum(d?.vol_real) && isNum(d?.hh_direct) && d!.hh_direct! > 0
+    const k = goals.g.palletsPerContainer
+    const inbound = p.containers ? inboundCalc(d?.vol_plan, d?.vol_real, d?.staff_present, staffPlan, k) : null
+    const prod = inbound
+      ? inbound.perPerson
+      : isNum(d?.vol_real) && isNum(d?.hh_direct) && d!.hh_direct! > 0
         ? d!.vol_real! / d!.hh_direct!
         : null
+    const metaProd = inbound ? inbound.metaPerPerson : g.metaProd
+    const q = p.quality ? data.quality[p.quality] : undefined
+    const errors = p.quality ? (q?.value ?? null) : (d?.errors ?? null)
     const s = {
       vol: stRatio(d?.vol_real, d?.vol_plan),
-      prod: stRatio(prod, g.metaProd),
+      pallets: inbound ? stRatio(inbound.palletsReal, inbound.palletsPlan) : ('na' as Status),
+      prod: stRatio(prod, metaProd),
       dot: stRatio(d?.staff_present, staffPlan),
       mc: stRatio(d?.equip_available, equipPlan),
-      err: stLimit(d?.errors, g.metaErr),
+      err: stLimit(errors, g.metaErr),
     }
     statuses.push(s.vol, s.prod, s.dot, s.mc, s.err)
-    return { def: p, goal: g, data: d, staffPlan, equipPlan, prod, volPct: pct(d?.vol_real, d?.vol_plan), s }
+    return {
+      def: p,
+      goal: g,
+      data: d,
+      staffPlan,
+      equipPlan,
+      prod,
+      metaProd,
+      inbound,
+      errors,
+      errorsUpdatedAt: p.quality ? q?.updated_at : d?.updated_at,
+      /** Módulo que llena el indicador de calidad cuando no es el dueño de la fila. */
+      errSource: p.quality
+        ? (() => {
+            const m = QUALITY_METRICS.find((x) => x.id === p.quality)!.module
+            return m.charAt(0).toUpperCase() + m.slice(1)
+          })()
+        : null,
+      palletsPerContainer: k,
+      volPct: pct(d?.vol_real, d?.vol_plan),
+      s,
+    }
   })
 
   const fr = data.fillRate

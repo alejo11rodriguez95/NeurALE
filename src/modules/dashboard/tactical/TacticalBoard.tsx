@@ -7,15 +7,19 @@ import { DASHBOARD_MODULE, MODULES, withAlpha } from '@/shared/modules'
 
 import {
   EMPTY_COMMITMENTS,
+  fetchEmployeeName,
   saveSafety,
   saveSettings,
   saveShift,
   type Commitment,
+  type ShiftRow,
 } from './api'
 import { SHIFTS, addDays } from './config'
 import { GoalsDialog, HistoryDialog, HousekeepingDialog } from './dialogs'
 import { STATUS_COLOR, computeBoard, fmt, type Board } from './metrics'
 import { Button, Cell, NumberDialog, Ratio, ShiftPicker, fieldClass, ringStyle, type NumField } from './ui'
+
+const LOGO = '/brand/logo-cdnneo-2026.jpg'
 import { useLiveShift, useTactical } from './useTactical'
 
 const C = DASHBOARD_MODULE.color
@@ -29,7 +33,7 @@ type Modal =
 
 const hhmm = (iso?: string) =>
   iso
-    ? new Date(iso).toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit', timeZone: 'America/El_Salvador' })
+    ? new Date(iso).toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23', timeZone: 'America/El_Salvador' })
     : null
 
 /**
@@ -49,15 +53,31 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
   const [modal, setModal] = useState<Modal>(null)
   const [toast, setToast] = useState<string | null>(null)
 
-  // Campos de texto con autoguardado (compromisos, jefe de turno)
+  // Compromisos con autoguardado
   const [comp, setComp] = useState<Commitment[]>(EMPTY_COMMITMENTS)
-  const [lead, setLead] = useState('')
   const editing = useRef(false)
   useEffect(() => {
     if (editing.current || !data) return
     setComp(data.shift?.commitments ?? EMPTY_COMMITMENTS)
-    setLead(data.shift?.shift_lead ?? '')
   }, [data])
+
+  // Jefe de turno = nombre del gerente que inició sesión (se guarda con el
+  // turno la primera vez que ese gerente captura algo; luego se respeta).
+  const [managerName, setManagerName] = useState<string | null>(null)
+  useEffect(() => {
+    if (!isManager || !adminUser?.employee_id) return
+    fetchEmployeeName(adminUser.employee_id).then(setManagerName)
+  }, [isManager, adminUser?.employee_id])
+  const lead = data?.shift?.shift_lead || (isManager ? managerName : null) || null
+
+  // Pantalla completa: solo desde "En vivo" hacia abajo
+  const fsRef = useRef<HTMLDivElement>(null)
+  const [isFs, setIsFs] = useState(false)
+  useEffect(() => {
+    const on = () => setIsFs(document.fullscreenElement === fsRef.current && !!fsRef.current)
+    document.addEventListener('fullscreenchange', on)
+    return () => document.removeEventListener('fullscreenchange', on)
+  }, [])
 
   useEffect(() => {
     if (!toast) return
@@ -78,20 +98,24 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
     }
   }
 
+  /** Guarda datos del gerente para el turno, sellando el jefe de turno. */
+  function shiftSave(values: Partial<Omit<ShiftRow, 'shift_date' | 'shift'>>) {
+    return saveShift(key, { ...values, shift_lead: lead })
+  }
+
   function saveText() {
     editing.current = false
     const prevComp = data?.shift?.commitments ?? EMPTY_COMMITMENTS
-    const prevLead = data?.shift?.shift_lead ?? ''
-    if (JSON.stringify(prevComp) === JSON.stringify(comp) && prevLead === lead) return
-    run(() => saveShift(key, { commitments: comp, shift_lead: lead || null }))
+    if (JSON.stringify(prevComp) === JSON.stringify(comp)) return
+    run(() => shiftSave({ commitments: comp }))
   }
 
   function toggleFullscreen() {
     try {
       if (document.fullscreenElement) document.exitFullscreen()
-      else document.documentElement.requestFullscreen().catch(() => setToast('Usa F11 para pantalla completa'))
+      else fsRef.current?.requestFullscreen().catch(() => setToast('Pantalla completa no disponible: usa F11'))
     } catch {
-      setToast('Usa F11 para pantalla completa')
+      setToast('Pantalla completa no disponible: usa F11')
     }
   }
 
@@ -107,9 +131,14 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
       <div className="relative flex min-h-0 flex-1 flex-col gap-3 overflow-auto p-3 xl:p-4 [@media(min-height:860px)]:lg:overflow-hidden">
         {/* ---------- Encabezado ---------- */}
         <header
-          className="flex flex-wrap items-end gap-x-5 gap-y-3 rounded-2xl border bg-neurale-surface px-4 py-3 backdrop-blur-md"
+          className="flex flex-wrap items-center gap-x-5 gap-y-3 rounded-2xl border bg-neurale-surface px-4 py-3 backdrop-blur-md"
           style={{ borderColor: withAlpha(C, 0.25), boxShadow: `inset 0 -2px 0 ${C}` }}
         >
+          <img
+            src={LOGO}
+            alt="CD Nneo"
+            className="h-14 w-auto rounded-lg border border-white/10 shadow-[0_4px_18px_rgba(0,0,0,0.45)]"
+          />
           <div className="mr-auto flex flex-col">
             <span className="flex items-center gap-2 text-[11px] font-medium tracking-[0.22em] text-white/50 uppercase">
               <span className="rounded bg-neurale-red px-1.5 py-0.5 font-display text-[11px] font-bold tracking-[0.14em] text-white">
@@ -118,23 +147,9 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
               Diálogo táctico · por turno
             </span>
             <h1 className="font-display text-3xl leading-tight font-semibold" style={{ textShadow: `0 0 30px ${withAlpha(C, 0.4)}` }}>
-              CD Nneo <span className="font-medium text-white/45">· Nejapa</span>
+              CD Nneo
             </h1>
           </div>
-          <ShiftPicker date={date} shift={shift} onDate={live.setDate} onShift={live.setShift} color={C} />
-          <label className="flex flex-col gap-1">
-            <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Jefe de turno</span>
-            <input
-              value={lead}
-              disabled={!isManager}
-              placeholder="Quién presenta"
-              onFocus={() => (editing.current = true)}
-              onChange={(e) => setLead(e.target.value)}
-              onBlur={saveText}
-              className={`${fieldClass} min-h-9 w-44`}
-              style={ringStyle(C)}
-            />
-          </label>
           <div className="flex flex-wrap gap-2">
             {isManager ? <Button onClick={() => setModal({ kind: 'goals' })}>Metas</Button> : null}
             <Button onClick={() => setModal({ kind: 'history' })}>Historial</Button>
@@ -145,6 +160,11 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
           </div>
         </header>
 
+        {/* ---------- Zona de pantalla completa: desde "En vivo" hacia abajo ---------- */}
+        <div
+          ref={fsRef}
+          className="flex flex-1 flex-col gap-3 [@media(min-height:860px)]:lg:min-h-0 [&:fullscreen]:overflow-auto [&:fullscreen]:bg-neurale-bg [&:fullscreen]:p-4"
+        >
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-white/50">
           {live.follow ? (
             <span className="flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-semibold tracking-wider uppercase" style={{ color: C, borderColor: withAlpha(C, 0.5) }}>
@@ -165,6 +185,15 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
           </span>
           {loadedAt ? <span>Actualizado {loadedAt.toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit' })}</span> : null}
           {error ? <span className="text-rose-300">Error: {error}</span> : null}
+          {isFs ? (
+            <button
+              type="button"
+              onClick={toggleFullscreen}
+              className="ml-auto rounded-full border border-white/20 px-2.5 py-0.5 font-semibold tracking-wider text-white/70 uppercase hover:text-white"
+            >
+              Salir de pantalla completa
+            </button>
+          ) : null}
         </div>
 
         {!board ? (
@@ -217,6 +246,15 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
 
             {/* ---------- Columna lateral ---------- */}
             <aside className="flex flex-col gap-3 [@media(min-height:860px)]:lg:min-h-0">
+              <section className="flex flex-col gap-2.5 rounded-2xl border border-neurale-border bg-neurale-surface p-3 backdrop-blur-md">
+                <ShiftPicker date={date} shift={shift} onDate={live.setDate} onShift={live.setShift} color={C} />
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Jefe de turno</span>
+                  <span className="flex min-h-9 items-center rounded-lg border border-neurale-border bg-white/5 px-3 font-display text-base font-semibold tracking-wide text-white uppercase">
+                    {lead || <span className="text-sm font-normal tracking-normal text-white/35 normal-case">Sin asignar</span>}
+                  </span>
+                </div>
+              </section>
               <Card title="Seguridad">
                 <div className="grid grid-cols-2 gap-1.5">
                   <Cell
@@ -313,7 +351,7 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
                               kind: 'num',
                               title: 'Orden · 5S',
                               fields: [{ key: 'audit_5s', label: 'Puntaje 5S (%)', value: data!.shift?.audit_5s }],
-                              save: (v) => saveShift(key, { audit_5s: v.audit_5s }),
+                              save: (v) => shiftSave({ audit_5s: v.audit_5s }),
                             })
                         : undefined
                     }
@@ -333,7 +371,7 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
                                 { key: 'preop_done', label: 'Checklists completados', value: data!.shift?.preop_done, integer: true },
                                 { key: 'preop_in_use', label: 'Montacargas en uso', value: data!.shift?.preop_in_use, integer: true },
                               ],
-                              save: (v) => saveShift(key, v),
+                              save: (v) => shiftSave(v),
                             })
                         : undefined
                     }
@@ -345,63 +383,65 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
             </aside>
           </main>
         )}
+
+        {/* ---------- Modales ---------- */}
+        {modal?.kind === 'num' ? (
+          <NumberDialog
+            title={modal.title}
+            subtitle={sub}
+            fields={modal.fields}
+            note={modal.note}
+            color={C}
+            onClose={() => setModal(null)}
+            onSave={async (v) => {
+              await modal.save(v)
+              setToast('Guardado')
+              reload()
+            }}
+          />
+        ) : null}
+        {modal?.kind === 'hk' && data ? (
+          <HousekeepingDialog
+            initial={data.shift?.housekeeping ?? { r: {}, obs: '' }}
+            subtitle={sub}
+            onClose={() => setModal(null)}
+            onSave={async (hk) => {
+              await shiftSave({ housekeeping: hk })
+              setToast('Evaluación guardada')
+              reload()
+            }}
+          />
+        ) : null}
+        {modal?.kind === 'goals' && settings ? (
+          <GoalsDialog
+            goals={settings.goals}
+            onClose={() => setModal(null)}
+            onSave={async (g) => {
+              await saveSettings({ goals: g })
+              setToast('Metas guardadas')
+              reload()
+            }}
+          />
+        ) : null}
+        {modal?.kind === 'history' && settings ? (
+          <HistoryDialog
+            settings={settings}
+            onClose={() => setModal(null)}
+            onOpen={(d, s) => {
+              live.setDate(d)
+              live.setShift(s)
+            }}
+          />
+        ) : null}
+
+        {toast ? (
+          <div className="fixed bottom-5 left-1/2 z-[70] -translate-x-1/2 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-neurale-bg shadow-lg">
+            {toast}
+          </div>
+        ) : null}
+        </div>
       </div>
 
-      {/* ---------- Modales ---------- */}
-      {modal?.kind === 'num' ? (
-        <NumberDialog
-          title={modal.title}
-          subtitle={sub}
-          fields={modal.fields}
-          note={modal.note}
-          color={C}
-          onClose={() => setModal(null)}
-          onSave={async (v) => {
-            await modal.save(v)
-            setToast('Guardado')
-            reload()
-          }}
-        />
-      ) : null}
-      {modal?.kind === 'hk' && data ? (
-        <HousekeepingDialog
-          initial={data.shift?.housekeeping ?? { r: {}, obs: '' }}
-          subtitle={sub}
-          onClose={() => setModal(null)}
-          onSave={async (hk) => {
-            await saveShift(key, { housekeeping: hk })
-            setToast('Evaluación guardada')
-            reload()
-          }}
-        />
-      ) : null}
-      {modal?.kind === 'goals' && settings ? (
-        <GoalsDialog
-          goals={settings.goals}
-          onClose={() => setModal(null)}
-          onSave={async (g) => {
-            await saveSettings({ goals: g })
-            setToast('Metas guardadas')
-            reload()
-          }}
-        />
-      ) : null}
-      {modal?.kind === 'history' && settings ? (
-        <HistoryDialog
-          settings={settings}
-          onClose={() => setModal(null)}
-          onOpen={(d, s) => {
-            live.setDate(d)
-            live.setShift(s)
-          }}
-        />
-      ) : null}
-
-      {toast ? (
-        <div className="fixed bottom-5 left-1/2 z-[70] -translate-x-1/2 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-neurale-bg shadow-lg">
-          {toast}
-        </div>
-      ) : null}
     </div>,
     document.body,
   )
@@ -440,16 +480,40 @@ function Matrix({ board }: { board: Board }) {
                 <b className="font-display text-base leading-tight font-semibold break-words xl:text-lg">{r.def.nombre}</b>
                 <small className="text-xs text-white/45">{u}</small>
                 <small className="text-[10px] tracking-wide uppercase" style={{ color: upd ? mod.color : 'rgba(255,255,255,0.3)' }}>
-                  {upd ? `${mod.label} · ${upd}` : `${mod.label} · sin captura`}
+                  {upd ? `Actualizado ${upd}` : 'Sin captura'}
                 </small>
               </div>
+              {r.inbound ? (
+                <div className="grid min-w-0 grid-cols-2 gap-1.5">
+                  <Cell
+                    compact
+                    status={r.s.vol}
+                    label="Contenedores"
+                    value={<Ratio a={fmt(d?.vol_real)} b={fmt(d?.vol_plan)} />}
+                    meta={r.volPct === null ? 'Real / plan' : `${fmt(r.volPct)}% del plan`}
+                  />
+                  <Cell
+                    compact
+                    status={r.s.pallets}
+                    label="Pallets aprox."
+                    value={<Ratio a={fmt(r.inbound.palletsReal)} b={fmt(r.inbound.palletsPlan)} />}
+                    meta={`×${fmt(r.palletsPerContainer)} por cont.`}
+                  />
+                </div>
+              ) : (
+                <Cell
+                  status={r.s.vol}
+                  label="Real / plan"
+                  value={<Ratio a={fmt(d?.vol_real)} b={fmt(d?.vol_plan)} />}
+                  meta={r.volPct === null ? 'Sin dato' : `${fmt(r.volPct)}% del plan`}
+                />
+              )}
               <Cell
-                status={r.s.vol}
-                label="Real / plan"
-                value={<Ratio a={fmt(d?.vol_real)} b={fmt(d?.vol_plan)} />}
-                meta={r.volPct === null ? 'Sin dato' : `${fmt(r.volPct)}% del plan`}
+                status={r.s.prod}
+                label={r.inbound ? 'Pallets por persona' : `${u} por hora-hombre`}
+                value={fmt(r.prod)}
+                meta={r.inbound ? `Meta ${fmt(r.metaProd)} (pallets plan ÷ dotación)` : `Meta ${fmt(r.metaProd)}`}
               />
-              <Cell status={r.s.prod} label={`${u} por hora-hombre`} value={fmt(r.prod)} meta={`Meta ${fmt(r.goal.metaProd)}`} />
               <Cell
                 status={r.s.dot}
                 label="Presentes / plan"
@@ -478,7 +542,12 @@ function Matrix({ board }: { board: Board }) {
                         : 'Flota completa'
                 }
               />
-              <Cell status={r.s.err} label={r.def.err} value={fmt(d?.errors)} meta={`Máximo ${r.goal.metaErr}`} />
+              <Cell
+                status={r.s.err}
+                label={r.def.err}
+                value={fmt(r.errors)}
+                meta={`Máximo ${r.goal.metaErr}${r.errSource ? ` · lo llena ${r.errSource}` : ''}`}
+              />
             </Row>
           )
         })}

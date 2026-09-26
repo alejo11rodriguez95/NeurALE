@@ -1,6 +1,6 @@
 import { supabase } from '@/lib/supabase'
 
-import { normalizeGoals, type Goals, type HkValue, type ProcessId, type ShiftId } from './config'
+import { normalizeGoals, type Goals, type HkValue, type ProcessId, type QualityMetric, type ShiftId } from './config'
 
 /**
  * Acceso a datos del Diálogo Táctico (tablas `dashboard_tactical_*`, ver
@@ -18,6 +18,7 @@ export const T = {
   safety: 'dashboard_tactical_safety',
   shift: 'dashboard_tactical_shift',
   settings: 'dashboard_tactical_settings',
+  quality: 'dashboard_tactical_quality',
 } as const
 
 export interface ProcessRow {
@@ -41,6 +42,14 @@ export interface FillRateRow {
   lines_requested: number | null
   lines_dispatched: number | null
   shortage_cause: string | null
+  updated_at?: string
+}
+
+export interface QualityRow {
+  shift_date: string
+  shift: ShiftId
+  metric: QualityMetric
+  value: number | null
   updated_at?: string
 }
 
@@ -82,6 +91,7 @@ export interface TacticalData {
   fillRate: FillRateRow | null
   safety: SafetyRow | null
   shift: ShiftRow | null
+  quality: Partial<Record<QualityMetric, QualityRow>>
 }
 
 export const EMPTY_COMMITMENTS: Commitment[] = [
@@ -125,20 +135,25 @@ export async function fetchSettings(): Promise<Settings> {
 }
 
 export async function fetchShiftData(date: string, shift: ShiftId): Promise<TacticalData> {
-  const [p, f, s, sh] = await Promise.all([
+  const [p, f, s, sh, q] = await Promise.all([
     supabase.from(T.process).select('*').eq('shift_date', date).eq('shift', shift),
     supabase.from(T.fillRate).select('*').eq('shift_date', date).eq('shift', shift).maybeSingle(),
     supabase.from(T.safety).select('*').eq('shift_date', date).eq('shift', shift).maybeSingle(),
     supabase.from(T.shift).select('*').eq('shift_date', date).eq('shift', shift).maybeSingle(),
+    supabase.from(T.quality).select('*').eq('shift_date', date).eq('shift', shift),
   ])
   fail(p.error)
+  fail(q.error)
   fail(f.error)
   fail(s.error)
   fail(sh.error)
   const processes: TacticalData['processes'] = {}
   for (const row of (p.data ?? []) as ProcessRow[]) processes[row.process_id] = row
+  const quality: TacticalData['quality'] = {}
+  for (const row of (q.data ?? []) as QualityRow[]) quality[row.metric] = row
   return {
     processes,
+    quality,
     fillRate: (f.data as FillRateRow | null) ?? null,
     safety: (s.data as SafetyRow | null) ?? null,
     shift: normalizeShift(sh.data),
@@ -157,22 +172,24 @@ export async function fetchRange(from: string, to: string) {
         fail(error)
         return (data ?? []) as R[]
       })
-  const [processes, fillRates, safety, shifts] = await Promise.all([
+  const [processes, fillRates, safety, shifts, quality] = await Promise.all([
     q<ProcessRow>(T.process),
     q<FillRateRow>(T.fillRate),
     q<SafetyRow>(T.safety),
     q<Record<string, unknown>>(T.shift),
+    q<QualityRow>(T.quality),
   ])
   const map = new Map<string, TacticalData & { date: string; shiftId: ShiftId }>()
   const get = (date: string, shift: ShiftId) => {
     const k = `${date}|${shift}`
     if (!map.has(k))
-      map.set(k, { date, shiftId: shift, processes: {}, fillRate: null, safety: null, shift: null })
+      map.set(k, { date, shiftId: shift, processes: {}, fillRate: null, safety: null, shift: null, quality: {} })
     return map.get(k)!
   }
   processes.forEach((r) => (get(r.shift_date, r.shift).processes[r.process_id] = r))
   fillRates.forEach((r) => (get(r.shift_date, r.shift).fillRate = r))
   safety.forEach((r) => (get(r.shift_date, r.shift).safety = r))
+  quality.forEach((r) => (get(r.shift_date, r.shift).quality[r.metric] = r))
   shifts.forEach((r) => {
     const n = normalizeShift(r)!
     get(n.shift_date, n.shift).shift = n
@@ -204,6 +221,19 @@ export async function saveFillRate(
     .from(T.fillRate)
     .upsert({ ...key, ...values }, { onConflict: 'shift_date,shift' })
   fail(error)
+}
+
+export async function saveQuality(key: Key, metric: QualityMetric, value: number | null) {
+  const { error } = await supabase
+    .from(T.quality)
+    .upsert({ ...key, metric, value }, { onConflict: 'shift_date,shift,metric' })
+  fail(error)
+}
+
+/** Nombre del empleado ligado al usuario (para "Jefe de turno"). */
+export async function fetchEmployeeName(employeeId: string): Promise<string | null> {
+  const { data } = await supabase.from('admin_employees').select('full_name').eq('id', employeeId).maybeSingle()
+  return (data?.full_name as string | undefined) ?? null
 }
 
 export async function saveSafety(key: Key, values: Partial<Omit<SafetyRow, 'shift_date' | 'shift'>>) {
