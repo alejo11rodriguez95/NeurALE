@@ -312,7 +312,7 @@ export function HistoryDialog({
   function exportCsv() {
     if (!rows?.length) return
     const head = [
-      'Fecha', 'Semana', 'Turno', 'Jefe de turno', '% indicadores en meta', 'Housekeeping %', 'Nivel housekeeping',
+      'Fecha', 'Semana', 'Turno', 'Gerente de CD', '% indicadores en meta', 'Housekeeping %', 'Nivel housekeeping',
       'Líneas solicitadas', 'Líneas despachadas', 'FR sucursales %', 'Causa faltante',
       'Días sin LTI', 'Incidentes', 'Casi accidentes', 'Actos inseguros', '5S %', 'Pre-op hechos', 'Montacargas en uso',
     ]
@@ -390,7 +390,7 @@ export function HistoryDialog({
           <table className="w-full min-w-[760px] text-sm tabular-nums">
             <thead>
               <tr>
-                {['Fecha', 'Sem.', 'Turno', 'Jefe de turno', 'En meta', 'Housekeeping', 'FR sucursales', 'Incidentes', 'Días sin LTI'].map((h) => (
+                {['Fecha', 'Sem.', 'Turno', 'Gerente de CD', 'En meta', 'Housekeeping', 'FR sucursales', 'Incidentes', 'Días sin LTI'].map((h) => (
                   <th key={h} className="p-1.5 text-left text-[11px] font-medium tracking-wider text-white/45 uppercase">
                     {h}
                   </th>

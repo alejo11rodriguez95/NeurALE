@@ -230,10 +230,40 @@ export async function saveQuality(key: Key, metric: QualityMetric, value: number
   fail(error)
 }
 
-/** Nombre del empleado ligado al usuario (para "Jefe de turno"). */
+/** Nombre del empleado ligado al usuario (para "Gerente de CD"). */
 export async function fetchEmployeeName(employeeId: string): Promise<string | null> {
   const { data } = await supabase.from('admin_employees').select('full_name').eq('id', employeeId).maybeSingle()
   return (data?.full_name as string | undefined) ?? null
+}
+
+export interface AreaLead {
+  module: string
+  name: string
+}
+
+/**
+ * Jefes de área activos por módulo (admin_users con nivel jefe_area + nombre
+ * del catálogo de empleados). gerencia/admin pueden leer todos los usuarios
+ * (política admin_users_select); a otros roles les regresa solo lo visible.
+ */
+export async function fetchAreaLeads(): Promise<AreaLead[]> {
+  const { data: users, error } = await supabase
+    .from('admin_users')
+    .select('module, employee_id')
+    .eq('access_level', 'jefe_area')
+    .eq('active', true)
+  fail(error)
+  const rows = (users ?? []) as { module: string | null; employee_id: string }[]
+  if (!rows.length) return []
+  const { data: emps, error: e2 } = await supabase
+    .from('admin_employees')
+    .select('id, full_name')
+    .in('id', rows.map((r) => r.employee_id))
+  fail(e2)
+  const names = new Map(((emps ?? []) as { id: string; full_name: string }[]).map((e) => [e.id, e.full_name]))
+  return rows
+    .filter((r) => r.module && names.has(r.employee_id))
+    .map((r) => ({ module: r.module!, name: names.get(r.employee_id)! }))
 }
 
 export async function saveSafety(key: Key, values: Partial<Omit<SafetyRow, 'shift_date' | 'shift'>>) {

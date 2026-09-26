@@ -7,10 +7,12 @@ import { DASHBOARD_MODULE, MODULES, withAlpha } from '@/shared/modules'
 
 import {
   EMPTY_COMMITMENTS,
+  fetchAreaLeads,
   fetchEmployeeName,
   saveSafety,
   saveSettings,
   saveShift,
+  type AreaLead,
   type Commitment,
   type ShiftRow,
 } from './api'
@@ -61,7 +63,7 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
     setComp(data.shift?.commitments ?? EMPTY_COMMITMENTS)
   }, [data])
 
-  // Jefe de turno = nombre del gerente que inició sesión (se guarda con el
+  // Gerente de CD = nombre del gerente que inició sesión (se guarda con el
   // turno la primera vez que ese gerente captura algo; luego se respeta).
   const [managerName, setManagerName] = useState<string | null>(null)
   useEffect(() => {
@@ -69,6 +71,14 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
     fetchEmployeeName(adminUser.employee_id).then(setManagerName)
   }, [isManager, adminUser?.employee_id])
   const lead = data?.shift?.shift_lead || (isManager ? managerName : null) || null
+
+  // Jefes de turno = jefes de área activos de cada módulo (Usuarios y Roles)
+  const [areaLeads, setAreaLeads] = useState<AreaLead[] | null>(null)
+  useEffect(() => {
+    fetchAreaLeads()
+      .then(setAreaLeads)
+      .catch(() => setAreaLeads([]))
+  }, [])
 
   // Pantalla completa: solo desde "En vivo" hacia abajo
   const fsRef = useRef<HTMLDivElement>(null)
@@ -246,13 +256,40 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
 
             {/* ---------- Columna lateral ---------- */}
             <aside className="flex flex-col gap-3 [@media(min-height:860px)]:lg:min-h-0">
-              <section className="flex flex-col gap-2.5 rounded-2xl border border-neurale-border bg-neurale-surface p-3 backdrop-blur-md">
+              <section className="flex flex-col gap-2 rounded-2xl border border-neurale-border bg-neurale-surface p-3 backdrop-blur-md">
+                {isFs ? (
+                  // En pantalla completa el encabezado queda fuera: el logo sube aquí.
+                  <img
+                    src={LOGO}
+                    alt="CD Nneo"
+                    className="h-14 w-auto self-start rounded-lg border border-white/10 shadow-[0_4px_18px_rgba(0,0,0,0.45)]"
+                  />
+                ) : null}
                 <ShiftPicker date={date} shift={shift} onDate={live.setDate} onShift={live.setShift} color={C} />
                 <div className="flex flex-col gap-1">
-                  <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Jefe de turno</span>
-                  <span className="flex min-h-9 items-center rounded-lg border border-neurale-border bg-white/5 px-3 font-display text-base font-semibold tracking-wide text-white uppercase">
+                  <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Gerente de CD</span>
+                  <span className="flex min-h-8 items-center rounded-lg border border-neurale-border bg-white/5 px-3 font-display text-base font-semibold tracking-wide text-white uppercase">
                     {lead || <span className="text-sm font-normal tracking-normal text-white/35 normal-case">Sin asignar</span>}
                   </span>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Jefes de turno</span>
+                  <div className="flex flex-col gap-0.5 rounded-lg border border-neurale-border bg-white/5 px-3 py-1.5">
+                    {MODULES.map((m) => {
+                      const names = (areaLeads ?? []).filter((l) => l.module === m.id).map((l) => l.name)
+                      return (
+                        <div key={m.id} className="flex min-w-0 items-baseline gap-2 text-[11px] leading-snug">
+                          <span className="h-1.5 w-1.5 shrink-0 translate-y-[-1px] rounded-full" style={{ background: m.color }} />
+                          <span className="w-[4.6rem] shrink-0 text-[10px] tracking-wider uppercase" style={{ color: m.color }}>
+                            {m.label}
+                          </span>
+                          <span className="truncate font-medium text-white/85 uppercase" title={names.join(', ')}>
+                            {areaLeads === null ? '…' : names.length ? names.join(', ') : <span className="text-white/30 normal-case">Sin asignar</span>}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
               </section>
               <Card title="Seguridad">
@@ -602,18 +639,16 @@ function Summary({ board }: { board: Board }) {
   const s = board.summary
   const t = s.measured || 1
   return (
-    <section className="mt-auto grid grid-cols-4 gap-x-2 gap-y-2 rounded-2xl border border-neurale-border bg-neurale-surface p-3 backdrop-blur-md">
-      <div className="col-span-4 flex items-end justify-between">
-        <div className="flex flex-col">
-          <span className="text-[11px] tracking-wider text-white/45 uppercase">Indicadores en meta</span>
-          <span className="font-display text-[clamp(2.2rem,5vh,3.2rem)] leading-none font-semibold tabular-nums">
-            {s.inGoal === null ? '—' : `${s.inGoal}%`}
-          </span>
-        </div>
+    <section className="mt-auto grid grid-cols-[auto_repeat(4,minmax(0,1fr))] items-end gap-x-3 gap-y-2 rounded-2xl border border-neurale-border bg-neurale-surface p-3 backdrop-blur-md">
+      <div className="flex flex-col pr-1">
+        <span className="text-[10px] tracking-wider text-white/45 uppercase">En meta</span>
+        <span className="font-display text-[clamp(1.8rem,3.8vh,2.6rem)] leading-none font-semibold tabular-nums">
+          {s.inGoal === null ? '—' : `${s.inGoal}%`}
+        </span>
       </div>
       {(
         [
-          ['En meta', s.ok, STATUS_COLOR.ok],
+          ['Verde', s.ok, STATUS_COLOR.ok],
           ['Alerta', s.warn, STATUS_COLOR.warn],
           ['Fuera', s.bad, STATUS_COLOR.bad],
           ['Sin dato', s.na, 'rgba(255,255,255,0.4)'],
@@ -626,12 +661,12 @@ function Summary({ board }: { board: Board }) {
           </span>
         </div>
       ))}
-      <div className="col-span-4 flex h-2.5 overflow-hidden rounded-full bg-white/10" aria-hidden>
+      <div className="col-span-5 flex h-2.5 overflow-hidden rounded-full bg-white/10" aria-hidden>
         <i style={{ width: `${(s.ok / t) * 100}%`, background: STATUS_COLOR.ok }} />
         <i style={{ width: `${(s.warn / t) * 100}%`, background: STATUS_COLOR.warn }} />
         <i style={{ width: `${(s.bad / t) * 100}%`, background: STATUS_COLOR.bad }} />
       </div>
-      <span className="col-span-4 text-[10px] leading-snug text-white/35">
+      <span className="col-span-5 text-[10px] leading-snug text-white/35 [@media(max-height:1200px)]:hidden">
         Verde ≥ 100% de la meta · amarillo 90–99% · rojo &lt; 90%. En calidad, verde = dentro del máximo.
       </span>
     </section>
