@@ -1,4 +1,5 @@
 import { OptionCard } from '@/modules/outbound/components/OptionCard'
+import { TacticalModuleOption } from '@/modules/dashboard/tactical/TacticalModuleOption'
 import { MODULES } from '@/shared/modules'
 
 const moduleDef = MODULES.find((m) => m.id === 'outbound')!
@@ -25,6 +26,7 @@ export function OutboundHome({ onNavigate }: { onNavigate: (view: string) => voi
         description="Escanea el QR de un muelle para registrar la llegada de un camión y da seguimiento hasta su salida."
         onClick={() => onNavigate('rutas')}
       />
+      <TacticalModuleOption moduleId="outbound" onNavigate={onNavigate} />
     </div>
   )
 }

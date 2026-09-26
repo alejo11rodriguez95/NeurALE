@@ -1,4 +1,5 @@
 import { OptionCard } from '@/modules/picking/components/OptionCard'
+import { TacticalModuleOption } from '@/modules/dashboard/tactical/TacticalModuleOption'
 import { MODULES } from '@/shared/modules'
 
 const moduleDef = MODULES.find((m) => m.id === 'picking')!
@@ -19,6 +20,7 @@ export function PickingHome({ onNavigate }: { onNavigate: (view: string) => void
         description="Seguimiento de las incidencias de calidad reportadas por Outbound durante la preparación de pedidos."
         onClick={() => onNavigate('calidad')}
       />
+      <TacticalModuleOption moduleId="picking" onNavigate={onNavigate} />
     </div>
   )
 }

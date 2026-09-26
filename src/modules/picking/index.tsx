@@ -2,6 +2,8 @@ import { useSearchParams } from 'react-router-dom'
 
 import { PickingHome } from '@/modules/picking/PickingHome'
 import { QualityManagementView } from '@/modules/picking/quality-control/QualityManagementView'
+import { TacticalCaptureView } from '@/modules/dashboard/tactical/TacticalCaptureView'
+import { TACTICAL_VIEW } from '@/modules/dashboard/tactical/TacticalModuleOption'
 import { ModuleScreen } from '@/shared/components/ModuleScreen'
 import { MODULES } from '@/shared/modules'
 
@@ -33,6 +35,7 @@ export default function PickingModule() {
             ← Volver a Picking
           </button>
           {view === 'calidad' ? <QualityManagementView /> : null}
+          {view === TACTICAL_VIEW ? <TacticalCaptureView moduleId="picking" /> : null}
         </div>
       ) : (
         <PickingHome onNavigate={goTo} />

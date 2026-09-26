@@ -3,6 +3,8 @@ import { useSearchParams } from 'react-router-dom'
 import { DockRoutesView } from '@/modules/outbound/dock-routes/DockRoutesView'
 import { OutboundHome } from '@/modules/outbound/OutboundHome'
 import { QualityIncidentsView } from '@/modules/outbound/quality/QualityIncidentsView'
+import { TacticalCaptureView } from '@/modules/dashboard/tactical/TacticalCaptureView'
+import { TACTICAL_VIEW } from '@/modules/dashboard/tactical/TacticalModuleOption'
 import { ModuleScreen } from '@/shared/components/ModuleScreen'
 import { MODULES } from '@/shared/modules'
 
@@ -34,6 +36,7 @@ export default function OutboundModule() {
             ← Volver a Outbound
           </button>
           {view === 'calidad' ? <QualityIncidentsView /> : null}
+          {view === TACTICAL_VIEW ? <TacticalCaptureView moduleId="outbound" /> : null}
           {view === 'rutas' ? <DockRoutesView /> : null}
         </div>
       ) : (
