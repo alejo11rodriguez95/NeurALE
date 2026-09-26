@@ -60,5 +60,7 @@ export interface AdminUser {
   access_level: AccessLevel
   module: ModuleRole | null
   active: boolean
+  /** true = la contraseña la puso un admin (temporal); debe cambiarla antes de entrar a cualquier módulo. */
+  must_change_password: boolean
   created_at: string
 }

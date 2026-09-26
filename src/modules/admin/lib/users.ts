@@ -16,7 +16,7 @@ export async function fetchUsers(): Promise<AdminUserWithEmployee[]> {
   const { data, error } = await supabase
     .from('admin_users')
     .select(
-      'id, employee_id, auth_user_id, email, access_level, module, active, created_at, employee:admin_employees(employee_code, full_name)',
+      'id, employee_id, auth_user_id, email, access_level, module, active, must_change_password, created_at, employee:admin_employees(employee_code, full_name)',
     )
     .order('created_at', { ascending: false })
 
@@ -33,12 +33,13 @@ async function invokeManageUser(body: Record<string, unknown>) {
 
 export async function createUser(input: {
   employee_id: string
-  email: string
+  /** Vacío/omitido: el empleado no tiene correo real, inicia sesión con su código de empleado. */
+  email?: string
   password: string
   access_level: AccessLevel
   module: ModuleRole | null
 }): Promise<AdminUser> {
-  return invokeManageUser({ action: 'create', ...input })
+  return invokeManageUser({ action: 'create', ...input, email: input.email || null })
 }
 
 export async function updateUser(

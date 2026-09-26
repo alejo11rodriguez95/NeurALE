@@ -12,12 +12,19 @@ import { useAuth } from '@/shared/auth/AuthContext'
  * crear un sistema nuevo — si el chat de Setup y Diseño quiere darle una
  * identidad propia (color/tagline del hemisferio izquierdo), esta pantalla
  * es el punto de partida a pulir, no algo cerrado.
+ *
+ * Decisión 2026-09-21: además del correo completo, se acepta la parte antes
+ * de la @ (ej. "josue.rodriguez") o el código de empleado (para quien no
+ * tiene correo real). Supabase Auth solo entiende correo, así que lo que se
+ * escribe aquí se resuelve primero contra `admin_users` (acción
+ * `resolve_login` de la Edge Function, pública y sin sesión) y luego se
+ * manda ese correo real a `signInWithPassword`.
  */
 export default function Login() {
   const navigate = useNavigate()
   const location = useLocation()
   const { session } = useAuth()
-  const [email, setEmail] = useState('')
+  const [identifier, setIdentifier] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
@@ -33,13 +40,30 @@ export default function Login() {
     e.preventDefault()
     setError(null)
     setLoading(true)
-    const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
-    setLoading(false)
-    if (signInError) {
-      setError('Correo o contraseña incorrectos.')
-      return
+
+    try {
+      const { data: resolved, error: resolveError } = await supabase.functions.invoke(
+        'admin-manage-user',
+        { body: { action: 'resolve_login', identifier: identifier.trim() } },
+      )
+      if (resolveError || !resolved?.email) {
+        setError('Correo, usuario o contraseña incorrectos.')
+        return
+      }
+
+      const { error: signInError } = await supabase.auth.signInWithPassword({
+        email: resolved.email,
+        password,
+      })
+      if (signInError) {
+        setError('Correo, usuario o contraseña incorrectos.')
+        return
+      }
+
+      navigate(from, { replace: true })
+    } finally {
+      setLoading(false)
     }
-    navigate(from, { replace: true })
   }
 
   return (
@@ -50,12 +74,13 @@ export default function Login() {
 
         <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
           <label className="block text-xs font-medium text-white/55">
-            Correo
+            Correo, usuario o código de empleado
             <input
-              type="email"
+              type="text"
               required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              placeholder="josue.rodriguez@vidri.com.sv, josue.rodriguez o 10583"
               className="mt-1.5 w-full rounded-lg border border-neurale-border bg-white/5 px-3 py-2 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2"
               style={{ '--tw-ring-color': '#5eead4' } as React.CSSProperties}
             />

@@ -59,7 +59,7 @@ export function UsersRolesView() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
-    if (!employeeId || !email.trim() || !password.trim()) return
+    if (!employeeId || !password.trim()) return
     if (needsModule && !module) {
       setError('Selecciona el módulo para este nivel de acceso.')
       return
@@ -126,19 +126,22 @@ export function UsersRolesView() {
           </label>
 
           <label className={fieldLabelClass}>
-            Correo
+            Correo (opcional)
             <input
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              placeholder="Déjalo vacío si no tiene correo"
               className={fieldControlClass}
               style={ringStyle(ADMIN_SECTION.color)}
-              required
             />
+            <span className="mt-1 block text-[11px] font-normal text-white/35">
+              Sin correo, inicia sesión con su código de empleado.
+            </span>
           </label>
 
           <label className={fieldLabelClass}>
-            Contraseña inicial
+            Contraseña temporal
             <input
               type="text"
               value={password}
@@ -148,6 +151,9 @@ export function UsersRolesView() {
               minLength={6}
               required
             />
+            <span className="mt-1 block text-[11px] font-normal text-white/35">
+              El usuario deberá cambiarla al iniciar sesión por primera vez.
+            </span>
           </label>
 
           <label className={fieldLabelClass}>
@@ -217,7 +223,11 @@ export function UsersRolesView() {
             {visibleUsers.map((u) => (
               <tr key={u.id} className="border-b border-neurale-border/60 last:border-0">
                 <td className="px-4 py-3 text-white/80">{u.employee?.full_name ?? '—'}</td>
-                <td className="px-4 py-3 text-white/70">{u.email}</td>
+                <td className="px-4 py-3 text-white/70">
+                  {u.email.endsWith('@neurale.local')
+                    ? `Código ${u.employee?.employee_code ?? '—'} (sin correo)`
+                    : u.email}
+                </td>
                 <td className="px-4 py-3 text-white/55">{ACCESS_LEVEL_LABEL[u.access_level]}</td>
                 <td className="px-4 py-3 text-white/55">
                   {u.module ? MODULES.find((m) => m.id === u.module)?.label ?? u.module : '—'}

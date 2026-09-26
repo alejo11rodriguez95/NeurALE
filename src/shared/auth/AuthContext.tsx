@@ -35,7 +35,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const { data } = await supabase
       .from('admin_users')
-      .select('id, employee_id, auth_user_id, email, access_level, module, active, created_at')
+      .select(
+        'id, employee_id, auth_user_id, email, access_level, module, active, must_change_password, created_at',
+      )
       .eq('auth_user_id', userId)
       .eq('active', true)
       .maybeSingle()

@@ -4,6 +4,7 @@ import { Navigate, useLocation } from 'react-router-dom'
 import type { AdminUser } from '@/lib/supabase'
 
 import { useAuth } from './AuthContext'
+import { ForcePasswordChange } from './ForcePasswordChange'
 
 /**
  * Protege la entrada a un módulo (o a Configuraciones y Administradores):
@@ -35,6 +36,10 @@ export function RequireAccess({
 
   if (!session) {
     return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  }
+
+  if (adminUser?.must_change_password) {
+    return <ForcePasswordChange />
   }
 
   if (!adminUser || !allow(adminUser)) {
