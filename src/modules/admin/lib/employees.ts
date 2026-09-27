@@ -56,7 +56,7 @@ export async function createEmployee(input: {
 
 export async function updateEmployee(
   id: string,
-  patch: Partial<Pick<Employee, 'full_name' | 'position_id' | 'active'>>,
+  patch: Partial<Pick<Employee, 'employee_code' | 'full_name' | 'position_id' | 'active'>>,
 ): Promise<Employee> {
   const { data, error } = await supabase
     .from('admin_employees')

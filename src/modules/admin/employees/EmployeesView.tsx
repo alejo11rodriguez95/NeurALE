@@ -5,6 +5,7 @@ import {
   bulkImportEmployees,
   createEmployee,
   fetchEmployees,
+  updateEmployee,
   type Employee,
 } from '@/modules/admin/lib/employees'
 import { createPosition, fetchPositions, type Position } from '@/modules/admin/lib/positions'
@@ -21,6 +22,7 @@ export function EmployeesView() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [positions, setPositions] = useState<Position[]>([])
   const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
 
   const [code, setCode] = useState('')
   const [name, setName] = useState('')
@@ -33,6 +35,15 @@ export function EmployeesView() {
   const [importResult, setImportResult] = useState<{ imported: number; errors: string[] } | null>(null)
   const [importing, setImporting] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
+
+  // Edición de un empleado ya existente (código, nombre, puesto, estado).
+  const [editTarget, setEditTarget] = useState<Employee | null>(null)
+  const [editCode, setEditCode] = useState('')
+  const [editName, setEditName] = useState('')
+  const [editPositionId, setEditPositionId] = useState('')
+  const [editActive, setEditActive] = useState(true)
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
 
   function reload() {
     Promise.all([fetchEmployees(), fetchPositions()]).then(([e, p]) => {
@@ -110,6 +121,52 @@ export function EmployeesView() {
     }
   }
 
+  function openEdit(emp: Employee) {
+    setEditTarget(emp)
+    setEditCode(emp.employee_code)
+    setEditName(emp.full_name)
+    setEditPositionId(emp.position_id ?? '')
+    setEditActive(emp.active)
+    setEditError(null)
+  }
+
+  function closeEdit() {
+    setEditTarget(null)
+    setEditError(null)
+  }
+
+  async function handleEditSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!editTarget) return
+    setEditError(null)
+    if (!editCode.trim() || !editName.trim()) return
+    setEditSaving(true)
+    try {
+      await updateEmployee(editTarget.id, {
+        employee_code: editCode.trim(),
+        full_name: editName.trim(),
+        position_id: editPositionId || null,
+        active: editActive,
+      })
+      closeEdit()
+      reload()
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'No se pudo guardar el cambio')
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  const filteredEmployees = employees.filter((emp) => {
+    const q = search.trim().toLowerCase()
+    if (!q) return true
+    return (
+      emp.full_name.toLowerCase().includes(q) ||
+      emp.employee_code.toLowerCase().includes(q) ||
+      (emp.position?.name ?? '').toLowerCase().includes(q)
+    )
+  })
+
   if (loading) return <p className="text-sm text-white/40">Cargando…</p>
 
   return (
@@ -186,6 +243,89 @@ export function EmployeesView() {
         </form>
       </GlassCard>
 
+      {editTarget ? (
+        <GlassCard className="p-5">
+          <div className="flex items-center justify-between">
+            <h2 className="font-display text-base font-semibold text-white">
+              Editar empleado — {editTarget.employee_code}
+            </h2>
+            <button type="button" onClick={closeEdit} className="text-xs text-white/50 hover:text-white/80">
+              Cancelar
+            </button>
+          </div>
+          <form onSubmit={handleEditSubmit} className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <label className={fieldLabelClass}>
+              Código de empleado
+              <input
+                value={editCode}
+                onChange={(e) => setEditCode(e.target.value)}
+                className={fieldControlClass}
+                style={ringStyle(ADMIN_SECTION.color)}
+                required
+              />
+            </label>
+            <label className={fieldLabelClass}>
+              Nombre completo
+              <input
+                value={editName}
+                onChange={(e) => setEditName(e.target.value)}
+                className={fieldControlClass}
+                style={ringStyle(ADMIN_SECTION.color)}
+                required
+              />
+            </label>
+            <label className={fieldLabelClass}>
+              Puesto
+              <select
+                value={editPositionId}
+                onChange={(e) => setEditPositionId(e.target.value)}
+                className={fieldControlClass}
+                style={ringStyle(ADMIN_SECTION.color)}
+              >
+                <option value="">— Sin puesto —</option>
+                {positions.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className={fieldLabelClass}>
+              Estado
+              <select
+                value={editActive ? 'activo' : 'inactivo'}
+                onChange={(e) => setEditActive(e.target.value === 'activo')}
+                className={fieldControlClass}
+                style={ringStyle(ADMIN_SECTION.color)}
+              >
+                <option value="activo">Activo</option>
+                <option value="inactivo">Inactivo</option>
+              </select>
+            </label>
+
+            {editError ? <p className="text-sm text-neurale-red sm:col-span-2">{editError}</p> : null}
+
+            <div className="flex gap-3 sm:col-span-2">
+              <button
+                type="submit"
+                disabled={editSaving}
+                className="rounded-lg px-4 py-2 text-sm font-semibold text-neurale-bg disabled:opacity-50"
+                style={{ background: ADMIN_SECTION.color }}
+              >
+                {editSaving ? 'Guardando…' : 'Guardar cambios'}
+              </button>
+              <button
+                type="button"
+                onClick={closeEdit}
+                className="rounded-lg border border-neurale-border px-4 py-2 text-sm text-white/70 hover:text-white"
+              >
+                Cancelar
+              </button>
+            </div>
+          </form>
+        </GlassCard>
+      ) : null}
+
       <GlassCard className="p-5">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-base font-semibold text-white">Carga masiva (CSV)</h2>
@@ -231,6 +371,18 @@ export function EmployeesView() {
       </GlassCard>
 
       <GlassCard className="overflow-hidden">
+        <div className="flex items-center justify-between border-b border-neurale-border p-4">
+          <h2 className="font-display text-sm font-semibold text-white/80">
+            Empleados ({filteredEmployees.length})
+          </h2>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por nombre, código o puesto…"
+            className="w-64 rounded-lg border border-neurale-border bg-white/5 px-3 py-1.5 text-sm text-white placeholder:text-white/30 focus:outline-none focus:ring-2"
+            style={ringStyle(ADMIN_SECTION.color)}
+          />
+        </div>
         <table className="w-full text-sm">
           <thead className="border-b border-neurale-border text-left text-xs text-white/45 uppercase">
             <tr>
@@ -238,21 +390,30 @@ export function EmployeesView() {
               <th className="px-4 py-3">Nombre</th>
               <th className="px-4 py-3">Puesto</th>
               <th className="px-4 py-3">Estado</th>
+              <th className="px-4 py-3" />
             </tr>
           </thead>
           <tbody>
-            {employees.map((emp) => (
+            {filteredEmployees.map((emp) => (
               <tr key={emp.id} className="border-b border-neurale-border/60 last:border-0">
                 <td className="px-4 py-3 text-white/80">{emp.employee_code}</td>
                 <td className="px-4 py-3 text-white/80">{emp.full_name}</td>
                 <td className="px-4 py-3 text-white/55">{emp.position?.name ?? '—'}</td>
                 <td className="px-4 py-3 text-white/55">{emp.active ? 'Activo' : 'Inactivo'}</td>
+                <td className="px-4 py-3 text-right">
+                  <button
+                    onClick={() => openEdit(emp)}
+                    className="text-xs text-white/50 hover:text-white/80"
+                  >
+                    Editar
+                  </button>
+                </td>
               </tr>
             ))}
-            {employees.length === 0 ? (
+            {filteredEmployees.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-4 py-6 text-center text-white/40">
-                  Sin empleados todavía.
+                <td colSpan={5} className="px-4 py-6 text-center text-white/40">
+                  {employees.length === 0 ? 'Sin empleados todavía.' : 'Sin resultados para esa búsqueda.'}
                 </td>
               </tr>
             ) : null}
