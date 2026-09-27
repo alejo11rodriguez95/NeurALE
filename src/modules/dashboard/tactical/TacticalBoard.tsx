@@ -22,6 +22,29 @@ import { STATUS_COLOR, computeBoard, fmt, type Board } from './metrics'
 import { Button, Cell, NumberDialog, Ratio, ShiftPicker, fieldClass, ringStyle, type NumField } from './ui'
 
 const LOGO = '/brand/logo-cdnneo-2026.jpg'
+
+/**
+ * Tema claro del tablero: el tablero usa los tokens de Tailwind (`--color-white`,
+ * `--color-neurale-*`), así que basta con redefinirlos dentro de `.tac-light`
+ * (el "blanco" pasa a ser el color de tinta oscuro). Los semáforos usan
+ * `--tac-*` para oscurecerse en fondo claro.
+ */
+const THEME_CSS = `
+.tac-light {
+  --color-white: #0f172a;
+  --color-neurale-bg: #eef1f5;
+  --color-neurale-deep: #ffffff;
+  --color-neurale-surface: rgba(255, 255, 255, 0.88);
+  --color-neurale-border: rgba(15, 23, 42, 0.12);
+  --tac-ok: #15803d;
+  --tac-lv2: #4d7c0f;
+  --tac-warn: #b45309;
+  --tac-bad: #dc2626;
+  --tac-na: rgba(15, 23, 42, 0.4);
+  color-scheme: light;
+}
+.tac-light input[type='date'] { color-scheme: light !important; }
+`
 /** Recorte más alto (más fondo metálico) para el bloque de pantalla completa. */
 const LOGO_TALL = '/brand/logo-cdnneo-2026-tall.jpg'
 import { useLiveShift, useTactical } from './useTactical'
@@ -83,6 +106,25 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
       .catch(() => setAreaLeads([]))
   }, [])
 
+  // Tema del tablero: oscuro por defecto; la elección se recuerda en este equipo.
+  const [light, setLight] = useState(() => {
+    try {
+      return localStorage.getItem('neurale:tactical-theme') === 'light'
+    } catch {
+      return false
+    }
+  })
+  function toggleTheme() {
+    setLight((v) => {
+      try {
+        localStorage.setItem('neurale:tactical-theme', v ? 'dark' : 'light')
+      } catch {
+        /* sin almacenamiento: solo dura esta sesión */
+      }
+      return !v
+    })
+  }
+
   // Pantalla completa: solo desde "En vivo" hacia abajo
   const fsRef = useRef<HTMLDivElement>(null)
   const [isFs, setIsFs] = useState(false)
@@ -137,7 +179,10 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
   // Portal a <body>: la animación de entrada compartida (.neural-enter) deja un
   // `transform` en el contenedor de la ruta, y eso atraparía a `position: fixed`.
   return createPortal(
-    <div className="fixed inset-0 z-50 flex flex-col overflow-hidden bg-neurale-bg text-white">
+    <div
+      className={`fixed inset-0 z-50 flex flex-col overflow-hidden bg-neurale-bg text-white ${light ? 'tac-light' : ''}`}
+    >
+      <style>{THEME_CSS}</style>
       <NeuralField color={C} seed="dashboard-tactical" className="absolute inset-0 opacity-40" />
       <div className="absolute inset-0 bg-gradient-to-b from-neurale-bg/90 via-neurale-bg/80 to-neurale-bg/95" />
 
@@ -176,7 +221,7 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
         {/* ---------- Zona de pantalla completa: desde "En vivo" hacia abajo ---------- */}
         <div
           ref={fsRef}
-          className="flex flex-1 flex-col gap-3 [@media(min-height:860px)]:lg:min-h-0 [&:fullscreen]:overflow-auto [&:fullscreen]:bg-neurale-bg [&:fullscreen]:p-4"
+          className={`flex flex-1 flex-col gap-3 [@media(min-height:860px)]:lg:min-h-0 [&:fullscreen]:bg-neurale-bg ${isFs ? 'h-screen min-h-0 overflow-hidden p-3' : ''}`}
         >
         {!isFs ? (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-white/50">
@@ -205,21 +250,21 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
         {!board ? (
           <div className="flex flex-1 items-center justify-center text-sm text-white/45">{error ? '' : 'Cargando diálogo táctico…'}</div>
         ) : (
-          <main className={`grid flex-1 grid-cols-1 gap-3 [@media(min-height:860px)]:lg:min-h-0 ${isFs ? 'lg:grid-cols-[minmax(0,1fr)_minmax(340px,28%)]' : 'lg:grid-cols-[minmax(0,1fr)_minmax(300px,25%)]'}`}>
+          <main className={`grid flex-1 grid-cols-1 gap-3 [@media(min-height:860px)]:lg:min-h-0 ${isFs ? 'min-h-0 grid-cols-[minmax(0,1fr)_minmax(330px,27%)]' : 'lg:grid-cols-[minmax(0,1fr)_minmax(300px,25%)]'}`}>
             {/* ---------- Columna principal ---------- */}
-            <div className="flex flex-col gap-3 [@media(min-height:860px)]:lg:min-h-0">
-              <Matrix board={board} />
+            <div className={`flex flex-col gap-3 [@media(min-height:860px)]:lg:min-h-0 ${isFs ? 'min-h-0' : ''}`}>
+              <Matrix board={board} dense={isFs} />
 
-              <section className="rounded-2xl border border-neurale-border bg-neurale-surface p-3 backdrop-blur-md">
-                <div className="mb-2 flex flex-wrap items-baseline gap-x-3">
+              <section className={`rounded-2xl border border-neurale-border bg-neurale-surface backdrop-blur-md ${isFs ? 'px-3 py-2' : 'p-3'}`}>
+                <div className={`flex flex-wrap items-baseline gap-x-3 ${isFs ? 'mb-1' : 'mb-2'}`}>
                   <h2 className="font-display text-sm font-semibold tracking-[0.14em] text-white/60 uppercase">Compromisos del turno</h2>
                   <span className="text-xs text-white/35">Los llena el gerente · se revisan al arranque del turno siguiente</span>
                 </div>
-                <div className="flex flex-col gap-1.5">
+                <div className={`flex flex-col ${isFs ? 'gap-1' : 'gap-1.5'}`}>
                   {comp.map((c, i) => (
                     <div key={i} className="grid grid-cols-[22px_1fr] items-center gap-2">
                       <span className="text-center font-display text-lg font-bold text-neurale-red">{i + 1}</span>
-                      <div className="grid grid-cols-2 gap-1.5 md:grid-cols-[minmax(0,1fr)_200px_150px]">
+                      <div className="grid grid-cols-2 gap-1.5 md:grid-cols-[minmax(0,1fr)_minmax(0,11rem)_minmax(0,8rem)]">
                         {(
                           [
                             ['problem', 'Problema o desvío'],
@@ -239,7 +284,7 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
                               next[i][f] = e.target.value
                               setComp(next)
                             }}
-                            className={`${fieldClass} ${f === 'problem' ? 'col-span-2 md:col-span-1' : ''}`}
+                            className={`${fieldClass} ${f === 'problem' ? 'col-span-2 md:col-span-1' : ''} ${isFs ? '!py-1' : ''}`}
                             style={ringStyle(C)}
                           />
                         ))}
@@ -251,13 +296,13 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
             </div>
 
             {/* ---------- Columna lateral ---------- */}
-            <aside className="flex flex-col gap-3 [@media(min-height:860px)]:lg:min-h-0">
-              <section className="flex flex-col gap-2 rounded-2xl border border-neurale-border bg-neurale-surface p-3 backdrop-blur-md">
+            <aside className={`flex flex-col [@media(min-height:860px)]:lg:min-h-0 ${isFs ? 'min-h-0 gap-2' : 'gap-3'}`}>
+              <section className={`flex shrink-0 flex-col rounded-2xl border border-neurale-border bg-neurale-surface backdrop-blur-md ${isFs ? 'gap-1.5 p-2.5' : 'gap-2 p-3'}`}>
                 {isFs ? (
                   // En pantalla completa el encabezado y la línea de estado quedan
                   // fuera: estado + logo con fecha / turno / semana a su derecha.
                   <>
-                    <div className="flex items-center gap-3 text-xs text-white/50">
+                    <div className="flex min-w-0 items-center gap-2 text-xs whitespace-nowrap text-white/50">
                       {live.follow ? (
                         <span
                           className="flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-semibold tracking-wider uppercase"
@@ -271,7 +316,7 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
                           onClick={live.backToLive}
                           className="rounded-full border border-white/20 px-2.5 py-0.5 font-semibold tracking-wider text-white/70 uppercase hover:text-white"
                         >
-                          Volver al turno actual
+                          Volver al turno
                         </button>
                       )}
                       {loadedAt ? (
@@ -283,21 +328,39 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
                       {error ? <span className="truncate text-rose-300">Error: {error}</span> : null}
                       <button
                         type="button"
+                        onClick={toggleTheme}
+                        title={light ? 'Cambiar a tema oscuro' : 'Cambiar a tema claro'}
+                        aria-label={light ? 'Cambiar a tema oscuro' : 'Cambiar a tema claro'}
+                        className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-white/70 transition-colors hover:border-white/35 hover:text-white"
+                      >
+                        {light ? (
+                          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                            <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />
+                          </svg>
+                        ) : (
+                          <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                            <circle cx="12" cy="12" r="4" />
+                            <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
+                          </svg>
+                        )}
+                      </button>
+                      <button
+                        type="button"
                         onClick={toggleFullscreen}
                         title="Salir de pantalla completa (Esc)"
                         aria-label="Salir de pantalla completa"
-                        className="ml-auto flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-white/70 transition-colors hover:border-white/35 hover:text-white"
+                        className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-white/70 transition-colors hover:border-white/35 hover:text-white"
                       >
                         <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                           <path d="M9 3v4a2 2 0 0 1-2 2H3M15 3v4a2 2 0 0 0 2 2h4M9 21v-4a2 2 0 0 0-2-2H3M15 21v-4a2 2 0 0 1 2-2h4" />
                         </svg>
                       </button>
                     </div>
-                    <div className="grid grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] items-stretch gap-3">
+                    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-2.5">
                       <img
                         src={LOGO_TALL}
                         alt="CD Nneo"
-                        className="h-full max-h-[7.4rem] w-full rounded-lg border border-white/10 object-cover object-center shadow-[0_4px_18px_rgba(0,0,0,0.45)]"
+                        className="aspect-[743/320] h-auto w-full rounded-lg border border-white/10 object-contain shadow-[0_4px_18px_rgba(0,0,0,0.45)]"
                       />
                       <ShiftPicker compact date={date} shift={shift} onDate={live.setDate} onShift={live.setShift} color={C} />
                     </div>
@@ -307,13 +370,13 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
                 )}
                 <div className="flex flex-col gap-1">
                   <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Gerente de CD</span>
-                  <span className="flex min-h-8 items-center rounded-lg border border-neurale-border bg-white/5 px-3 font-display text-base font-semibold tracking-wide text-white uppercase">
+                  <span className={`flex items-center rounded-lg border border-neurale-border bg-white/5 px-3 font-display font-semibold tracking-wide text-white uppercase ${isFs ? 'min-h-7 text-sm' : 'min-h-8 text-base'}`}>
                     {lead || <span className="text-sm font-normal tracking-normal text-white/35 normal-case">Sin asignar</span>}
                   </span>
                 </div>
                 <div className="flex flex-col gap-1">
                   <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Jefes de turno</span>
-                  <div className="flex flex-col gap-0.5 rounded-lg border border-neurale-border bg-white/5 px-3 py-1.5">
+                  <div className={`flex flex-col rounded-lg border border-neurale-border bg-white/5 px-3 ${isFs ? 'gap-0 py-1' : 'gap-0.5 py-1.5'}`}>
                     {MODULES.map((m) => {
                       const names = (areaLeads ?? []).filter((l) => l.module === m.id).map((l) => l.name)
                       return (
@@ -331,13 +394,19 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
                   </div>
                 </div>
               </section>
-              <Card title="Seguridad" grow>
-                <div className="grid flex-1 grid-cols-2 grid-rows-[minmax(min-content,1.25fr)_minmax(min-content,1fr)] gap-1.5">
+              <Card title="Seguridad" grow fit={isFs}>
+                <div
+                  className={`grid flex-1 gap-1.5 ${
+                    isFs
+                      ? 'min-h-0 grid-cols-[1.25fr_1fr_1fr] grid-rows-[minmax(0,1fr)]'
+                      : 'grid-cols-2 grid-rows-[minmax(min-content,1.25fr)_minmax(min-content,1fr)]'
+                  }`}
+                >
                   <Cell
                     big
-                    className="col-span-2"
+                    className={isFs ? '' : 'col-span-2'}
                     status={board.safety.incidents > 0 ? 'bad' : board.safety.lti === null ? 'na' : 'ok'}
-                    label="Días sin accidentes con tiempo perdido (LTI)"
+                    label={isFs ? 'Días sin accidentes (LTI)' : 'Días sin accidentes con tiempo perdido (LTI)'}
                     value={fmt(board.safety.lti)}
                     meta={
                       board.safety.lti === null
@@ -372,7 +441,7 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
                   />
                   <Cell
                     status={board.safety.incStatus}
-                    label="Accidentes / incidentes del turno"
+                    label={isFs ? 'Incidentes del turno' : 'Accidentes / incidentes del turno'}
                     value={board.safety.incidents}
                     meta="Meta 0 · inicia el turno en 0"
                     onClick={() =>
@@ -387,7 +456,7 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
                   />
                   <Cell
                     status="na"
-                    label="Casi accidentes / actos inseguros"
+                    label={isFs ? 'Casi acc. / actos inseg.' : 'Casi accidentes / actos inseguros'}
                     value={<Ratio a={board.safety.nearMisses} b={board.safety.unsafeActs} />}
                     meta="Más reportes = más prevención"
                     onClick={() =>
@@ -405,19 +474,25 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
                 </div>
               </Card>
 
-              <Card title="Orden y equipo" grow>
-                <div className="grid flex-1 grid-cols-2 grid-rows-[minmax(min-content,1fr)_minmax(min-content,1fr)] gap-1.5">
+              <Card title="Orden y equipo" grow fit={isFs}>
+                <div
+                  className={`grid flex-1 gap-1.5 ${
+                    isFs
+                      ? 'min-h-0 grid-cols-[1.25fr_1fr_1fr] grid-rows-[minmax(0,1fr)]'
+                      : 'grid-cols-2 grid-rows-[minmax(min-content,1fr)_minmax(min-content,1fr)]'
+                  }`}
+                >
                   <Cell
-                    className="col-span-2"
+                    className={isFs ? '' : 'col-span-2'}
                     status={board.hk.cls}
-                    label="Housekeeping del turno · checklist ponderado"
+                    label={isFs ? 'Housekeeping' : 'Housekeeping del turno · checklist ponderado'}
                     value={board.hk.pct === null ? '—' : <>{fmt(board.hk.pct)}<span className="text-[0.55em] text-white/45">%</span></>}
                     meta={`${board.hk.lvl}${board.hk.crit ? ` · ${board.hk.crit} crítico(s) en No cumple` : ''}${board.hk.pend && board.hk.pct !== null ? ` · ${board.hk.pend} crítico(s) sin evaluar` : ''}`}
                     onClick={isManager ? () => setModal({ kind: 'hk' }) : undefined}
                   />
                   <Cell
                     status={board.s5.status}
-                    label="Auditoría 5S (mensual)"
+                    label={isFs ? '5S (mensual)' : 'Auditoría 5S (mensual)'}
                     value={board.s5.value === null ? '—' : <>{fmt(board.s5.value)}<span className="text-[0.55em] text-white/45">%</span></>}
                     meta={`Meta ${settings!.goals.g.s5}%`}
                     onClick={
@@ -434,7 +509,7 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
                   />
                   <Cell
                     status={board.preop.status}
-                    label="Pre-operacional montacargas"
+                    label={isFs ? 'Pre-operacional' : 'Pre-operacional montacargas'}
                     value={board.preop.pct === null ? '—' : <>{fmt(board.preop.pct)}<span className="text-[0.55em] text-white/45">%</span></>}
                     meta={`${fmt(data!.shift?.preop_done)} de ${fmt(data!.shift?.preop_in_use)} equipos`}
                     onClick={
@@ -455,7 +530,7 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
                 </div>
               </Card>
 
-              <Summary board={board} />
+              <Summary board={board} dense={isFs} />
             </aside>
           </main>
         )}
@@ -525,7 +600,7 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
 
 /* ---------- Matriz de procesos ---------- */
 
-function Matrix({ board }: { board: Board }) {
+function Matrix({ board, dense }: { board: Board; dense?: boolean }) {
   const heads = ['Volumen', 'Productividad', 'Dotación', 'Montacargas · Transporte', 'Calidad']
   const fr = board.fr
   const sol = fr.row?.lines_requested ?? null
@@ -533,8 +608,18 @@ function Matrix({ board }: { board: Board }) {
   const missing = sol !== null && des !== null ? sol - des : null
 
   return (
-    <section className="overflow-x-auto rounded-2xl [@media(min-height:860px)]:lg:min-h-0 [@media(min-height:860px)]:lg:flex-1 border border-neurale-border bg-neurale-surface p-2.5 backdrop-blur-md">
-      <div className="grid h-full min-w-[860px] grid-cols-[150px_repeat(5,minmax(0,1fr))] grid-rows-[auto_repeat(4,minmax(96px,1fr))_auto_minmax(96px,1fr)] gap-1.5">
+    <section
+      className={`rounded-2xl border border-neurale-border bg-neurale-surface backdrop-blur-md [@media(min-height:860px)]:lg:min-h-0 [@media(min-height:860px)]:lg:flex-1 ${
+        dense ? 'min-h-0 flex-1 overflow-hidden p-2' : 'overflow-x-auto p-2.5'
+      }`}
+    >
+      <div
+        className={`grid h-full gap-1.5 ${
+          dense
+            ? 'grid-cols-[minmax(104px,0.62fr)_repeat(5,minmax(0,1fr))] grid-rows-[auto_repeat(4,minmax(0,1fr))_auto_minmax(0,0.9fr)]'
+            : 'min-w-[860px] grid-cols-[150px_repeat(5,minmax(0,1fr))] grid-rows-[auto_repeat(4,minmax(96px,1fr))_auto_minmax(96px,1fr)]'
+        }`}
+      >
         <div />
         {heads.map((h) => (
           <div key={h} className="px-2 font-display text-xs font-semibold tracking-[0.12em] text-white/50 uppercase">
@@ -553,9 +638,9 @@ function Matrix({ board }: { board: Board }) {
                 className="flex flex-col justify-center gap-0.5 rounded-xl border-l-4 bg-white/[0.04] px-3 py-2"
                 style={{ borderColor: mod.color }}
               >
-                <b className="font-display text-base leading-tight font-semibold break-words xl:text-lg">{r.def.nombre}</b>
+                <b className={`font-display leading-tight font-semibold ${dense ? 'text-[clamp(0.85rem,1.15vw,1.125rem)]' : 'text-base break-words xl:text-lg'}`}>{r.def.nombre}</b>
                 <small className="text-xs text-white/45">{u}</small>
-                <small className="text-[10px] tracking-wide uppercase" style={{ color: upd ? mod.color : 'rgba(255,255,255,0.3)' }}>
+                <small className="text-[10px] tracking-wide uppercase" style={{ color: upd ? mod.color : 'color-mix(in oklab, var(--color-white) 30%, transparent)' }}>
                   {upd ? `Actualizado ${upd}` : 'Sin captura'}
                 </small>
               </div>
@@ -633,7 +718,7 @@ function Matrix({ board }: { board: Board }) {
         <div className="flex flex-col justify-center gap-0.5 rounded-xl border border-dashed border-white/15 px-3 py-2">
           <b className="font-display text-lg leading-tight font-semibold">Fill Rate</b>
           <small className="text-xs text-white/45">resultado al cliente</small>
-          <small className="text-[10px] tracking-wide uppercase" style={{ color: fr.row?.updated_at ? MODULES.find((m) => m.id === 'picking')!.color : 'rgba(255,255,255,0.3)' }}>
+          <small className="text-[10px] tracking-wide uppercase" style={{ color: fr.row?.updated_at ? MODULES.find((m) => m.id === 'picking')!.color : 'color-mix(in oklab, var(--color-white) 30%, transparent)' }}>
             {fr.row?.updated_at ? `Picking · ${hhmm(fr.row.updated_at)}` : 'Picking · sin captura'}
           </small>
         </div>
@@ -669,24 +754,28 @@ function Row({ children }: { children: ReactNode }) {
  * Tarjeta de la columna lateral. `grow`: en modo "cabe en pantalla" reparte
  * la altura sobrante para que no queden huecos (las celdas se estiran).
  */
-function Card({ title, children, grow }: { title: string; children: ReactNode; grow?: boolean }) {
+function Card({ title, children, grow, fit }: { title: string; children: ReactNode; grow?: boolean; fit?: boolean }) {
   return (
     <section
-      className={`flex flex-col rounded-2xl border border-neurale-border bg-neurale-surface p-3 backdrop-blur-md ${
+      className={`flex flex-col rounded-2xl border border-neurale-border bg-neurale-surface backdrop-blur-md ${
         grow ? '[@media(min-height:860px)]:lg:flex-1' : ''
-      }`}
+      } ${fit ? 'min-h-0 flex-1 p-2.5' : 'p-3'}`}
     >
-      <h2 className="mb-2 font-display text-sm font-semibold tracking-[0.14em] text-white/60 uppercase">{title}</h2>
+      <h2 className="mb-1.5 font-display text-sm font-semibold tracking-[0.14em] text-white/60 uppercase">{title}</h2>
       {children}
     </section>
   )
 }
 
-function Summary({ board }: { board: Board }) {
+function Summary({ board, dense }: { board: Board; dense?: boolean }) {
   const s = board.summary
   const t = s.measured || 1
   return (
-    <section className="grid grid-cols-[auto_repeat(4,minmax(0,1fr))] items-end gap-x-3 gap-y-2 rounded-2xl border border-neurale-border bg-neurale-surface p-3 backdrop-blur-md">
+    <section
+      className={`grid shrink-0 grid-cols-[auto_repeat(4,minmax(0,1fr))] items-end gap-x-3 rounded-2xl border border-neurale-border bg-neurale-surface backdrop-blur-md ${
+        dense ? 'gap-y-1.5 p-2.5' : 'gap-y-2 p-3'
+      }`}
+    >
       <div className="flex flex-col pr-1">
         <span className="text-[10px] tracking-wider text-white/45 uppercase">En meta</span>
         <span className="font-display text-[clamp(1.8rem,3.8vh,2.6rem)] leading-none font-semibold tabular-nums">
@@ -698,7 +787,7 @@ function Summary({ board }: { board: Board }) {
           ['Verde', s.ok, STATUS_COLOR.ok],
           ['Alerta', s.warn, STATUS_COLOR.warn],
           ['Fuera', s.bad, STATUS_COLOR.bad],
-          ['Sin dato', s.na, 'rgba(255,255,255,0.4)'],
+          ['Sin dato', s.na, 'color-mix(in oklab, var(--color-white) 40%, transparent)'],
         ] as const
       ).map(([l, v, c]) => (
         <div key={l} className="flex flex-col">

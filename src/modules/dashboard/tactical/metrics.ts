@@ -9,13 +9,17 @@ import { HK, PROCESSES, QUALITY_METRICS, daysBetween, goalFor, type HkValue } fr
 
 export type Status = 'ok' | 'lv2' | 'warn' | 'bad' | 'na'
 
+/** Colores de semáforo como variables CSS (el tema claro las oscurece, ver TacticalBoard). */
 export const STATUS_COLOR: Record<Status, string> = {
-  ok: '#4ade80',
-  lv2: '#a3e635',
-  warn: '#facc15',
-  bad: '#f87171',
-  na: 'rgba(255,255,255,0.35)',
+  ok: 'var(--tac-ok, #4ade80)',
+  lv2: 'var(--tac-lv2, #a3e635)',
+  warn: 'var(--tac-warn, #facc15)',
+  bad: 'var(--tac-bad, #f87171)',
+  na: 'var(--tac-na, rgba(255,255,255,0.35))',
 }
+
+/** Mezcla un color (hex o var CSS) con transparencia. */
+export const tint = (c: string, pct: number) => `color-mix(in oklab, ${c} ${pct}%, transparent)`
 
 export const isNum = (x: unknown): x is number =>
   x !== null && x !== undefined && x !== '' && !Number.isNaN(Number(x))

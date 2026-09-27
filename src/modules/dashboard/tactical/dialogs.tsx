@@ -58,7 +58,7 @@ export function HousekeepingDialog({
     ['c', 'Cumple', STATUS_COLOR.ok],
     ['p', 'Parcial', STATUS_COLOR.warn],
     ['n', 'No', STATUS_COLOR.bad],
-    ['x', 'N/A', 'rgba(255,255,255,0.5)'],
+    ['x', 'N/A', 'color-mix(in oklab, var(--color-white) 50%, transparent)'],
   ]
 
   return (
@@ -108,7 +108,7 @@ export function HousekeepingDialog({
                     {text}
                     <span
                       className="ml-2 rounded border px-1.5 text-[10px] font-semibold"
-                      style={w === 3 ? { color: STATUS_COLOR.bad, borderColor: STATUS_COLOR.bad } : { color: 'rgba(255,255,255,0.45)', borderColor: 'rgba(255,255,255,0.15)' }}
+                      style={w === 3 ? { color: STATUS_COLOR.bad, borderColor: STATUS_COLOR.bad } : { color: 'color-mix(in oklab, var(--color-white) 45%, transparent)', borderColor: 'color-mix(in oklab, var(--color-white) 15%, transparent)' }}
                     >
                       {w === 3 ? 'Crítico' : `Peso ${w}`}
                     </span>
@@ -125,7 +125,7 @@ export function HousekeepingDialog({
                           title={blocked ? 'Los puntos críticos siempre se evalúan' : undefined}
                           onClick={() => setR((prev) => ({ ...prev, [id]: prev[id] === v ? undefined : v }))}
                           className="min-h-9 min-w-14 flex-1 border-l border-neurale-border text-xs font-semibold first:border-l-0 disabled:cursor-not-allowed disabled:opacity-25"
-                          style={on ? { background: c, color: '#05070d' } : { color: 'rgba(255,255,255,0.6)' }}
+                          style={on ? { background: c, color: '#05070d' } : { color: 'color-mix(in oklab, var(--color-white) 60%, transparent)' }}
                         >
                           {blocked ? '—' : l}
                         </button>

@@ -3,7 +3,7 @@ import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode
 import { withAlpha } from '@/shared/modules'
 
 import { SHIFTS, isoWeek, type ShiftId } from './config'
-import { STATUS_COLOR, isNum, type Status } from './metrics'
+import { STATUS_COLOR, isNum, tint, type Status } from './metrics'
 
 /**
  * Piezas visuales del Diálogo Táctico. Locales al Dashboard a propósito (ver
@@ -50,15 +50,15 @@ export function Cell({
         onClick ? 'cursor-pointer hover:border-white/30' : ''
       } ${className}`}
       style={{
-        background: status === 'na' ? 'rgba(255,255,255,0.035)' : withAlpha(c, 0.1),
-        borderColor: status === 'na' ? 'rgba(255,255,255,0.07)' : withAlpha(c, 0.28),
+        background: status === 'na' ? 'color-mix(in oklab, var(--color-white) 3.5%, transparent)' : tint(c, 10),
+        borderColor: status === 'na' ? 'color-mix(in oklab, var(--color-white) 7%, transparent)' : tint(c, 28),
       }}
     >
       <span
         className="absolute top-2.5 right-2.5 h-2 w-2 rounded-full"
         style={{ background: c, boxShadow: status === 'na' ? 'none' : `0 0 8px ${c}` }}
       />
-      <span className="pr-4 text-[11px] leading-tight text-white/55">{label}</span>
+      <span className={`pr-4 text-[11px] leading-tight text-white/55 ${compact ? 'truncate' : ''}`}>{label}</span>
       <span
         className={`font-display leading-none font-semibold tabular-nums ${compact ? 'whitespace-nowrap' : ''} ${
           big
@@ -67,7 +67,7 @@ export function Cell({
               ? 'text-[clamp(1.1rem,2.4vh,1.6rem)]'
               : 'text-[clamp(1.35rem,3.1vh,2.1rem)]'
         }`}
-        style={{ color: status === 'na' ? 'rgba(255,255,255,0.45)' : c }}
+        style={{ color: status === 'na' ? 'color-mix(in oklab, var(--color-white) 45%, transparent)' : c }}
       >
         {value}
       </span>
@@ -161,7 +161,7 @@ export function Button({
       style={
         primary
           ? { background: color, borderColor: color, color: '#05070d' }
-          : { borderColor: 'rgba(255,255,255,0.12)', color: 'rgba(255,255,255,0.8)', background: 'rgba(255,255,255,0.04)' }
+          : { borderColor: 'color-mix(in oklab, var(--color-white) 12%, transparent)', color: 'color-mix(in oklab, var(--color-white) 80%, transparent)', background: 'color-mix(in oklab, var(--color-white) 4%, transparent)' }
       }
     >
       {children}
@@ -298,7 +298,7 @@ export function ShiftPicker({
             style={
               s.id === shift
                 ? { background: color, color: '#05070d' }
-                : { background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.6)' }
+                : { background: 'color-mix(in oklab, var(--color-white) 4%, transparent)', color: 'color-mix(in oklab, var(--color-white) 60%, transparent)' }
             }
           >
             {s.id}
