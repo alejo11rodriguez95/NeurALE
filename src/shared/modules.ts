@@ -29,6 +29,11 @@ export interface ModuleDef<Id extends AnyModuleId = AnyModuleId> {
   /** Color de acento del módulo (hex). Tiñe su nodo en el hub y su pantalla interna. */
   color: string
   /**
+   * Tono claro del acento, para bordes y luces. Solo lo usan las dos mitades del
+   * cerebro, donde hace falta separar el cuerpo (oscuro) del brillo (claro).
+   */
+  glow?: string
+  /**
    * `false` mientras la sección todavía no tiene ruta ni pantalla: se muestra en el
    * Núcleo Neuronal pero no navega. Distinto de "sin acceso" (que dependerá del rol).
    */
@@ -91,7 +96,9 @@ export const DASHBOARD_MODULE: ModuleDef<'dashboard'> = {
   tagline: 'Corteza · Gerencia',
   description:
     'Visualización en tiempo real de todos los módulos, para jefes de área y gerencia.',
-  color: '#5eead4',
+  // Hemisferio derecho: rojo VIDRI.
+  color: '#e30613',
+  glow: '#ff4d5e',
 }
 
 /**
@@ -111,8 +118,9 @@ export const ADMIN_SECTION: ModuleDef<'admin'> = {
   tagline: 'Corteza · Administración',
   description:
     'Gestión de administradores y usuarios, catálogos compartidos y configuración general de la plataforma.',
-  // Turquesa más profundo que el del Dashboard: mismo órgano, dos intensidades.
-  color: '#14b8a6',
+  // Hemisferio izquierdo: azul.
+  color: '#2f86d8',
+  glow: '#7cc4fb',
   available: true,
 }
 

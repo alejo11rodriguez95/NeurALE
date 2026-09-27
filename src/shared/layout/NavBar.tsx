@@ -13,13 +13,13 @@ export function NavBar() {
     <header className="sticky top-0 z-50 border-b border-neurale-border bg-neurale-bg/80 backdrop-blur-md">
       <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
         <Link to="/" className="flex items-center gap-3">
-          <span className="flex h-8 w-[78px] shrink-0 items-center justify-center rounded-md bg-white px-1.5 py-1">
-            <img
-              src="/brand/logo-cdnneo.jpeg"
-              alt="CD NNEO"
-              className="h-full w-full object-contain"
-            />
-          </span>
+          {/* El logo 3D trae su propio fondo de metal cepillado, así que va como
+              una placa y no necesita el recuadro blanco que usaba el anterior. */}
+          <img
+            src="/brand/logo-cdnneo-3d.jpg"
+            alt="CD NNEO"
+            className="h-7 w-[114px] shrink-0 rounded-[3px] object-cover ring-1 ring-white/10 sm:h-9 sm:w-[146px]"
+          />
           <span className="font-display text-lg font-semibold tracking-tight whitespace-nowrap text-white">
             Neur<span className="text-neurale-red">ALE</span>
           </span>

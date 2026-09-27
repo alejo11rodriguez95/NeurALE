@@ -26,7 +26,7 @@ export function Starfield({ count = 180 }: { count?: number }) {
       className="pointer-events-none fixed inset-0 -z-10 overflow-hidden bg-neurale-bg"
     >
       {/* Nebulosas */}
-      <div className="absolute -top-[10%] left-1/2 h-[70vh] w-[120vw] -translate-x-1/2 rounded-full bg-[radial-gradient(ellipse_at_center,rgba(45,212,191,0.10),transparent_62%)]" />
+      <div className="absolute -top-[10%] left-1/2 h-[70vh] w-[120vw] -translate-x-1/2 rounded-full bg-[radial-gradient(ellipse_at_center,rgba(124,196,251,0.09),transparent_62%)]" />
       <div className="absolute bottom-[-15%] left-1/2 h-[80vh] w-[120vw] -translate-x-1/2 rounded-full bg-[radial-gradient(ellipse_at_center,rgba(244,63,94,0.08),transparent_62%)]" />
 
       {stars.map((s, i) => (

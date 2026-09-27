@@ -73,67 +73,52 @@ function Spine({
 }
 
 /**
- * Etiqueta de un hemisferio. Va fuera del SVG (para poder ser HTML de verdad) pero
- * comparte el estado `active` con su mitad del cerebro: pasar el mouse por una
- * enciende la otra, en ambos sentidos. Eso es lo que enseña qué mitad es cuál.
+ * Nombre de un hemisferio. Aparece solo cuando esa mitad está activa (cursor o
+ * foco de teclado): en reposo el cerebro va limpio, sin ningún texto encima.
+ *
+ * En pantallas sin cursor no existe el hover, así que ahí las dos etiquetas se
+ * quedan siempre visibles — ver `.hemi-label` en index.css. Si no, en un celular
+ * nunca habría forma de saber qué hace cada mitad.
  */
-function HemisphereChip({
+function HemisphereLabel({
   section,
   shortLabel,
   side,
   active,
-  onActiveChange,
-  onSelect,
 }: {
   section: ModuleDef<AnyModuleId>
   shortLabel: string
   side: HemisphereSide
   active: HemisphereSide | null
-  onActiveChange: (side: HemisphereSide | null) => void
-  onSelect: () => void
 }) {
   const enabled = section.available !== false
   const isActive = active === side
+  const tone = section.glow ?? section.color
 
   return (
-    <button
-      type="button"
-      title={section.label}
-      aria-label={section.label}
-      aria-disabled={!enabled}
-      onClick={() => enabled && onSelect()}
-      onPointerEnter={() => onActiveChange(side)}
-      onPointerLeave={() => onActiveChange(null)}
-      onFocus={() => onActiveChange(side)}
-      onBlur={() => onActiveChange(null)}
-      className={`inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-[11px] tracking-[0.14em] uppercase transition-all duration-500 ${
-        enabled ? 'cursor-pointer' : 'cursor-default'
+    <span
+      aria-hidden="true"
+      className={`hemi-label pointer-events-none flex flex-col gap-0.5 whitespace-nowrap ${
+        side === 'left' ? 'items-start text-left' : 'items-end text-right'
       }`}
       style={{
-        color: section.color,
-        borderColor: withAlpha(section.color, isActive ? 0.7 : 0.3),
-        background: withAlpha(section.color, isActive ? 0.14 : 0.06),
-        boxShadow: isActive
-          ? `0 0 24px -6px ${withAlpha(section.color, 0.8)}`
-          : 'none',
+        opacity: isActive ? 1 : 0,
+        transform: `translateY(${isActive ? '0' : '8px'})`,
+        transition: 'opacity 0.4s var(--ease-neural), transform 0.4s var(--ease-neural)',
       }}
     >
       <span
-        className="block h-1.5 w-1.5 rounded-full transition-shadow duration-500"
-        style={{
-          background: section.color,
-          boxShadow: isActive
-            ? `0 0 10px 2px ${withAlpha(section.color, 0.85)}`
-            : 'none',
-        }}
-      />
-      {shortLabel}
+        className="font-display text-[9px] font-semibold tracking-[0.16em] uppercase sm:text-[12px] sm:tracking-[0.26em]"
+        style={{ color: tone, textShadow: `0 0 22px ${withAlpha(tone, 0.85)}` }}
+      >
+        {shortLabel}
+      </span>
       {!enabled && (
-        <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[9px] tracking-[0.08em] text-white/45">
+        <span className="text-[9px] tracking-[0.14em] text-white/40 uppercase">
           Pronto
         </span>
       )}
-    </button>
+    </span>
   )
 }
 
@@ -236,59 +221,57 @@ export default function NucleoNeuronal() {
 
   return (
     <div className="relative overflow-x-clip">
-      {/* Cerebro: dos hemisferios clicables. El texto va ARRIBA del cerebro para que
-          el tallo baje limpio hacia los módulos, sin cruzar ningún título. */}
-      <section className="relative flex flex-col items-center px-4 pt-6 sm:pt-10">
-        <span className="text-[10px] tracking-[0.4em] text-white/35 uppercase">
-          NeurALE · CD NNEO
-        </span>
-        <h1 className="mt-2 font-display text-3xl font-semibold text-white sm:text-4xl">
-          Núcleo Neuronal
-        </h1>
-        <p className="mt-3 max-w-xs text-center text-sm text-white/40 sm:max-w-md">
-          Dos mitades de un mismo cerebro: a la izquierda se administra la
-          plataforma, a la derecha se observa toda la operación.
-        </p>
+      {/* Cerebro: dos hemisferios clicables sobre el tendido de cables. Sin ningún
+          texto encima — los nombres aparecen al activar cada mitad. */}
+      <section className="relative isolate flex flex-col items-center overflow-hidden px-4 pt-4 sm:pt-8">
+        {/* El encabezado de la página existe para lectores de pantalla y para el
+            esquema del documento, aunque visualmente no se muestre nada. */}
+        <h1 className="sr-only">Núcleo Neuronal — CD NNEO</h1>
 
-        {/* Una etiqueta por hemisferio, en el mismo orden que las mitades. */}
-        <div className="mt-4 flex flex-wrap items-center justify-center gap-2.5">
-          <HemisphereChip
-            section={ADMIN_SECTION}
-            shortLabel="Configuraciones"
-            side="left"
+        <div className="relative z-10 w-full max-w-[1150px]">
+          {/* En pantallas angostas la pieza se agranda y los cables se salen del
+              encuadre: si cupiera entera, el cerebro quedaría diminuto. */}
+          <div className="relative left-1/2 w-[172%] -translate-x-1/2 sm:left-auto sm:w-full sm:translate-x-0">
+            <BrainCore
+              className="w-full"
+            left={{
+              color: ADMIN_SECTION.color,
+              glow: ADMIN_SECTION.glow ?? ADMIN_SECTION.color,
+              label: ADMIN_SECTION.label,
+              enabled: ADMIN_SECTION.available !== false,
+            }}
+            right={{
+              color: DASHBOARD_MODULE.color,
+              glow: DASHBOARD_MODULE.glow ?? DASHBOARD_MODULE.color,
+              label: DASHBOARD_MODULE.label,
+              enabled: DASHBOARD_MODULE.available !== false,
+            }}
             active={activeHemisphere}
             onActiveChange={setActiveHemisphere}
-            onSelect={() => goTo(ADMIN_SECTION.path)}
-          />
-          <HemisphereChip
-            section={DASHBOARD_MODULE}
-            shortLabel="Dashboard Neuronal"
-            side="right"
-            active={activeHemisphere}
-            onActiveChange={setActiveHemisphere}
-            onSelect={() => goTo(DASHBOARD_MODULE.path)}
-          />
+              onSelect={(side) => {
+                const target = side === 'left' ? ADMIN_SECTION : DASHBOARD_MODULE
+                if (target.available !== false) goTo(target.path)
+              }}
+            />
+          </div>
+
+          {/* Fila con altura reservada: los nombres aparecen y desaparecen sin
+              mover nada de lo que viene debajo. */}
+          <div className="mt-1 flex h-8 items-start justify-between px-2 sm:px-16">
+            <HemisphereLabel
+              section={ADMIN_SECTION}
+              shortLabel="Configuración"
+              side="left"
+              active={activeHemisphere}
+            />
+            <HemisphereLabel
+              section={DASHBOARD_MODULE}
+              shortLabel="Dashboard Neuronal"
+              side="right"
+              active={activeHemisphere}
+            />
+          </div>
         </div>
-
-        <BrainCore
-          className="mt-1 w-[290px] sm:w-[400px] md:w-[460px]"
-          left={{
-            color: ADMIN_SECTION.color,
-            label: ADMIN_SECTION.label,
-            enabled: ADMIN_SECTION.available !== false,
-          }}
-          right={{
-            color: DASHBOARD_MODULE.color,
-            label: DASHBOARD_MODULE.label,
-            enabled: DASHBOARD_MODULE.available !== false,
-          }}
-          active={activeHemisphere}
-          onActiveChange={setActiveHemisphere}
-          onSelect={(side) => {
-            const target = side === 'left' ? ADMIN_SECTION : DASHBOARD_MODULE
-            if (target.available !== false) goTo(target.path)
-          }}
-        />
       </section>
 
       {/* Tramo del tallo al primer módulo */}
