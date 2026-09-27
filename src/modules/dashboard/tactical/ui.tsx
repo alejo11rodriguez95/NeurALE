@@ -271,46 +271,66 @@ export function ShiftPicker({
   onShift: (s: ShiftId) => void
   color: string
 }) {
+  const fecha = (
+    <label className="flex min-w-0 flex-col gap-1">
+      <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Fecha</span>
+      <input
+        type="date"
+        value={date}
+        onChange={(e) => e.target.value && onDate(e.target.value)}
+        className={`${fieldClass} min-h-9 [color-scheme:dark] ${compact ? 'w-full' : 'w-auto'}`}
+        style={ringStyle(color)}
+      />
+    </label>
+  )
+  const turno = (
+    <div className="flex flex-col gap-1">
+      <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Turno</span>
+      <div className="flex overflow-hidden rounded-lg border border-neurale-border">
+        {SHIFTS.map((s) => (
+          <button
+            key={s.id}
+            type="button"
+            title={s.hours}
+            aria-pressed={s.id === shift}
+            onClick={() => onShift(s.id)}
+            className={`min-h-9 font-display text-base font-semibold ${compact ? 'flex-1 px-3' : 'px-4'}`}
+            style={
+              s.id === shift
+                ? { background: color, color: '#05070d' }
+                : { background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.6)' }
+            }
+          >
+            {s.id}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+  const semana = (
+    <div className="flex flex-col gap-1">
+      <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Semana</span>
+      <span className="flex min-h-9 items-center justify-center rounded-lg border border-neurale-border bg-white/5 px-3 font-display text-base font-semibold text-white tabular-nums">
+        S{isoWeek(date)}
+      </span>
+    </div>
+  )
+
+  // Compacto (pantalla completa, junto al logo): fecha arriba; turno y semana abajo.
+  if (compact)
+    return (
+      <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-x-2 gap-y-1.5">
+        <div className="col-span-2">{fecha}</div>
+        {turno}
+        {semana}
+      </div>
+    )
+
   return (
-    <div className={`flex items-end ${compact ? 'min-w-0 gap-2' : 'flex-wrap gap-3'}`}>
-      <label className="flex flex-col gap-1">
-        <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Fecha</span>
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => e.target.value && onDate(e.target.value)}
-          className={`${fieldClass} min-h-9 [color-scheme:dark] ${compact ? 'w-[8.2rem] px-2' : 'w-auto'}`}
-          style={ringStyle(color)}
-        />
-      </label>
-      <div className="flex flex-col gap-1">
-        <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Turno</span>
-        <div className="flex overflow-hidden rounded-lg border border-neurale-border">
-          {SHIFTS.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              title={s.hours}
-              aria-pressed={s.id === shift}
-              onClick={() => onShift(s.id)}
-              className={`min-h-9 font-display text-base font-semibold ${compact ? 'px-2.5' : 'px-4'}`}
-              style={
-                s.id === shift
-                  ? { background: color, color: '#05070d' }
-                  : { background: 'rgba(255,255,255,0.04)', color: 'rgba(255,255,255,0.6)' }
-              }
-            >
-              {s.id}
-            </button>
-          ))}
-        </div>
-      </div>
-      <div className="flex flex-col gap-1">
-        <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Semana</span>
-        <span className="flex min-h-9 items-center rounded-lg border border-neurale-border bg-white/5 px-3 font-display text-base font-semibold text-white tabular-nums">
-          S{isoWeek(date)}
-        </span>
-      </div>
+    <div className="flex flex-wrap items-end gap-3">
+      {fecha}
+      {turno}
+      {semana}
     </div>
   )
 }

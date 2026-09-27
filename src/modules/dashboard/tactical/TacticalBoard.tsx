@@ -22,6 +22,8 @@ import { STATUS_COLOR, computeBoard, fmt, type Board } from './metrics'
 import { Button, Cell, NumberDialog, Ratio, ShiftPicker, fieldClass, ringStyle, type NumField } from './ui'
 
 const LOGO = '/brand/logo-cdnneo-2026.jpg'
+/** Recorte más alto (más fondo metálico) para el bloque de pantalla completa. */
+const LOGO_TALL = '/brand/logo-cdnneo-2026-tall.jpg'
 import { useLiveShift, useTactical } from './useTactical'
 
 const C = DASHBOARD_MODULE.color
@@ -176,6 +178,7 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
           ref={fsRef}
           className="flex flex-1 flex-col gap-3 [@media(min-height:860px)]:lg:min-h-0 [&:fullscreen]:overflow-auto [&:fullscreen]:bg-neurale-bg [&:fullscreen]:p-4"
         >
+        {!isFs ? (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-xs text-white/50">
           {live.follow ? (
             <span className="flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-semibold tracking-wider uppercase" style={{ color: C, borderColor: withAlpha(C, 0.5) }}>
@@ -196,16 +199,8 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
           </span>
           {loadedAt ? <span>Actualizado {loadedAt.toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit' })}</span> : null}
           {error ? <span className="text-rose-300">Error: {error}</span> : null}
-          {isFs ? (
-            <button
-              type="button"
-              onClick={toggleFullscreen}
-              className="ml-auto rounded-full border border-white/20 px-2.5 py-0.5 font-semibold tracking-wider text-white/70 uppercase hover:text-white"
-            >
-              Salir de pantalla completa
-            </button>
-          ) : null}
         </div>
+        ) : null}
 
         {!board ? (
           <div className="flex flex-1 items-center justify-center text-sm text-white/45">{error ? '' : 'Cargando diálogo táctico…'}</div>
@@ -259,16 +254,54 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
             <aside className="flex flex-col gap-3 [@media(min-height:860px)]:lg:min-h-0">
               <section className="flex flex-col gap-2 rounded-2xl border border-neurale-border bg-neurale-surface p-3 backdrop-blur-md">
                 {isFs ? (
-                  // En pantalla completa el encabezado queda fuera: el logo sube
-                  // aquí, con fecha / turno / semana a su derecha.
-                  <div className="flex items-end gap-3">
-                    <img
-                      src={LOGO}
-                      alt="CD Nneo"
-                      className="h-[3.1rem] w-auto min-w-0 shrink rounded-lg border border-white/10 object-contain shadow-[0_4px_18px_rgba(0,0,0,0.45)]"
-                    />
-                    <ShiftPicker compact date={date} shift={shift} onDate={live.setDate} onShift={live.setShift} color={C} />
-                  </div>
+                  // En pantalla completa el encabezado y la línea de estado quedan
+                  // fuera: estado + logo con fecha / turno / semana a su derecha.
+                  <>
+                    <div className="flex items-center gap-3 text-xs text-white/50">
+                      {live.follow ? (
+                        <span
+                          className="flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 font-semibold tracking-wider uppercase"
+                          style={{ color: C, borderColor: withAlpha(C, 0.5) }}
+                        >
+                          <span className="soma-pulse h-1.5 w-1.5 rounded-full" style={{ background: C }} /> En vivo
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={live.backToLive}
+                          className="rounded-full border border-white/20 px-2.5 py-0.5 font-semibold tracking-wider text-white/70 uppercase hover:text-white"
+                        >
+                          Volver al turno actual
+                        </button>
+                      )}
+                      {loadedAt ? (
+                        <span>
+                          Actualizado{' '}
+                          {loadedAt.toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit', timeZone: 'America/El_Salvador' })}
+                        </span>
+                      ) : null}
+                      {error ? <span className="truncate text-rose-300">Error: {error}</span> : null}
+                      <button
+                        type="button"
+                        onClick={toggleFullscreen}
+                        title="Salir de pantalla completa (Esc)"
+                        aria-label="Salir de pantalla completa"
+                        className="ml-auto flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-white/70 transition-colors hover:border-white/35 hover:text-white"
+                      >
+                        <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M9 3v4a2 2 0 0 1-2 2H3M15 3v4a2 2 0 0 0 2 2h4M9 21v-4a2 2 0 0 0-2-2H3M15 21v-4a2 2 0 0 1 2-2h4" />
+                        </svg>
+                      </button>
+                    </div>
+                    <div className="grid grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] items-stretch gap-3">
+                      <img
+                        src={LOGO_TALL}
+                        alt="CD Nneo"
+                        className="h-full max-h-[7.4rem] w-full rounded-lg border border-white/10 object-cover object-center shadow-[0_4px_18px_rgba(0,0,0,0.45)]"
+                      />
+                      <ShiftPicker compact date={date} shift={shift} onDate={live.setDate} onShift={live.setShift} color={C} />
+                    </div>
+                  </>
                 ) : (
                   <ShiftPicker date={date} shift={shift} onDate={live.setDate} onShift={live.setShift} color={C} />
                 )}
