@@ -221,19 +221,17 @@ export default function NucleoNeuronal() {
 
   return (
     <div className="relative overflow-x-clip">
-      {/* Cerebro: dos hemisferios clicables sobre el tendido de cables. Sin ningún
-          texto encima — los nombres aparecen al activar cada mitad. */}
-      <section className="relative isolate flex flex-col items-center overflow-hidden px-4 pt-4 sm:pt-8">
+      {/* Cerebro: dos hemisferios clicables, el derecho rojo y el izquierdo azul.
+          Sin ningún texto encima — los nombres aparecen debajo, y solo al activar
+          esa mitad. */}
+      <section className="relative isolate flex flex-col items-center px-4 pt-4 sm:pt-8">
         {/* El encabezado de la página existe para lectores de pantalla y para el
             esquema del documento, aunque visualmente no se muestre nada. */}
         <h1 className="sr-only">Núcleo Neuronal — CD NNEO</h1>
 
-        <div className="relative z-10 w-full max-w-[1150px]">
-          {/* En pantallas angostas la pieza se agranda y los cables se salen del
-              encuadre: si cupiera entera, el cerebro quedaría diminuto. */}
-          <div className="relative left-1/2 w-[172%] -translate-x-1/2 sm:left-auto sm:w-full sm:translate-x-0">
-            <BrainCore
-              className="w-full"
+        <div className="relative z-10 flex w-full flex-col items-center">
+          <BrainCore
+            className="w-[300px] sm:w-[420px] md:w-[480px]"
             left={{
               color: ADMIN_SECTION.color,
               glow: ADMIN_SECTION.glow ?? ADMIN_SECTION.color,
@@ -248,16 +246,17 @@ export default function NucleoNeuronal() {
             }}
             active={activeHemisphere}
             onActiveChange={setActiveHemisphere}
-              onSelect={(side) => {
-                const target = side === 'left' ? ADMIN_SECTION : DASHBOARD_MODULE
-                if (target.available !== false) goTo(target.path)
-              }}
-            />
-          </div>
+            onSelect={(side) => {
+              const target = side === 'left' ? ADMIN_SECTION : DASHBOARD_MODULE
+              if (target.available !== false) goTo(target.path)
+            }}
+          />
 
           {/* Fila con altura reservada: los nombres aparecen y desaparecen sin
-              mover nada de lo que viene debajo. */}
-          <div className="mt-1 flex h-8 items-start justify-between px-2 sm:px-16">
+              mover nada de lo que viene debajo. Va más ancha que el cerebro para
+              que los dos nombres nunca se toquen, ni siquiera en un celular
+              (donde, sin cursor, se muestran los dos a la vez). */}
+          <div className="mt-1 flex h-9 w-full max-w-[600px] items-start justify-between px-2">
             <HemisphereLabel
               section={ADMIN_SECTION}
               shortLabel="Configuración"

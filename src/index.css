@@ -161,18 +161,16 @@ body {
     opacity 0.45s var(--ease-neural);
 }
 
-/* Indicador de foco de teclado de cada mitad del cerebro. Va en un elemento
-   aparte porque el `clip-path` que recorta la mitad también recortaría su
-   propio contorno; se enlaza con :has() para conservar :focus-visible, o sea
-   que aparece al tabular pero no al hacer clic. */
-.brain-focus-ring {
+/* Indicador de foco de teclado de cada mitad: es el propio contorno del
+   hemisferio, no un rectángulo alrededor. Con :focus-visible, o sea que
+   aparece al tabular pero no al hacer clic. */
+.hemi-ring {
   opacity: 0;
-  transition: opacity 0.15s linear;
+  transition: opacity 0.18s linear;
 }
 
-.brain-stage:has(.hemi-left:focus-visible) .ring-left,
-.brain-stage:has(.hemi-right:focus-visible) .ring-right {
-  opacity: 1;
+.hemi:focus-visible .hemi-ring {
+  opacity: 0.9;
 }
 
 /* En una pantalla táctil no existe el hover: si los nombres de los hemisferios

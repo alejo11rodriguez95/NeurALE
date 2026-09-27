@@ -72,7 +72,8 @@ export const MODULES: ModuleDef<ModuleId>[] = [
     label: 'Outbound',
     tagline: 'Salida de señal',
     description: 'Despacho y salida de mercancía.',
-    color: '#fb7185',
+    // Rosa, no rojo: el hemisferio derecho ya ocupa el rojo de la marca.
+    color: '#f472b6',
   },
   {
     id: 'inventory',
