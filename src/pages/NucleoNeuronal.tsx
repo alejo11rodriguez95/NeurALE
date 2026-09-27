@@ -73,14 +73,18 @@ function Spine({
 }
 
 /**
- * Nombre de un hemisferio. Aparece solo cuando esa mitad está activa (cursor o
- * foco de teclado): en reposo el cerebro va limpio, sin ningún texto encima.
+ * Nombre de un hemisferio, arriba del cerebro. Aparece solo cuando esa mitad
+ * está activa (cursor o foco de teclado): en reposo el cerebro va limpio, sin
+ * ningún texto encima.
  *
- * En pantallas sin cursor no existe el hover, así que ahí las dos etiquetas se
+ * Es decorativo a propósito — el control es el propio hemisferio, y una pastilla
+ * invisible pero clicable sería una trampa. Por eso `pointer-events-none`.
+ *
+ * En pantallas sin cursor no existe el hover, así que ahí las dos pastillas se
  * quedan siempre visibles — ver `.hemi-label` en index.css. Si no, en un celular
  * nunca habría forma de saber qué hace cada mitad.
  */
-function HemisphereLabel({
+function HemisphereChip({
   section,
   shortLabel,
   side,
@@ -93,28 +97,35 @@ function HemisphereLabel({
 }) {
   const enabled = section.available !== false
   const isActive = active === side
+  // Tono claro: en texto pequeño sobre fondo casi negro, el color de cuerpo
+  // (rojo o azul saturado) se apaga y cuesta leerlo.
   const tone = section.glow ?? section.color
 
   return (
     <span
       aria-hidden="true"
-      className={`hemi-label pointer-events-none flex flex-col gap-0.5 whitespace-nowrap ${
-        side === 'left' ? 'items-start text-left' : 'items-end text-right'
-      }`}
+      className="hemi-label pointer-events-none inline-flex items-center gap-2 rounded-full border px-3.5 py-1.5 text-[11px] tracking-[0.14em] whitespace-nowrap uppercase"
       style={{
+        color: tone,
+        borderColor: withAlpha(tone, isActive ? 0.7 : 0.3),
+        background: withAlpha(tone, isActive ? 0.14 : 0.06),
+        boxShadow: isActive ? `0 0 24px -6px ${withAlpha(tone, 0.8)}` : 'none',
         opacity: isActive ? 1 : 0,
-        transform: `translateY(${isActive ? '0' : '8px'})`,
-        transition: 'opacity 0.4s var(--ease-neural), transform 0.4s var(--ease-neural)',
+        transform: `translateY(${isActive ? '0' : '6px'})`,
+        transition:
+          'opacity 0.4s var(--ease-neural), transform 0.4s var(--ease-neural), border-color 0.5s var(--ease-neural), background 0.5s var(--ease-neural), box-shadow 0.5s var(--ease-neural)',
       }}
     >
       <span
-        className="font-display text-[9px] font-semibold tracking-[0.16em] uppercase sm:text-[12px] sm:tracking-[0.26em]"
-        style={{ color: tone, textShadow: `0 0 22px ${withAlpha(tone, 0.85)}` }}
-      >
-        {shortLabel}
-      </span>
+        className="block h-1.5 w-1.5 rounded-full"
+        style={{
+          background: tone,
+          boxShadow: isActive ? `0 0 10px 2px ${withAlpha(tone, 0.85)}` : 'none',
+        }}
+      />
+      {shortLabel}
       {!enabled && (
-        <span className="text-[9px] tracking-[0.14em] text-white/40 uppercase">
+        <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[9px] tracking-[0.08em] text-white/45">
           Pronto
         </span>
       )}
@@ -222,14 +233,33 @@ export default function NucleoNeuronal() {
   return (
     <div className="relative overflow-x-clip">
       {/* Cerebro: dos hemisferios clicables, el derecho rojo y el izquierdo azul.
-          Sin ningún texto encima — los nombres aparecen debajo, y solo al activar
-          esa mitad. */}
+          En reposo no se muestra ningún texto: el nombre de cada mitad aparece
+          arriba del cerebro solo mientras esa mitad está activa. */}
       <section className="relative isolate flex flex-col items-center px-4 pt-4 sm:pt-8">
         {/* El encabezado de la página existe para lectores de pantalla y para el
             esquema del documento, aunque visualmente no se muestre nada. */}
         <h1 className="sr-only">Núcleo Neuronal — CD NNEO</h1>
 
         <div className="relative z-10 flex w-full flex-col items-center">
+          {/* Fila de nombres, arriba del cerebro. Altura reservada para que al
+              aparecer y desaparecer no mueva nada de lo que viene debajo. Se
+              permite que salten de línea: en un celular las dos se muestran a
+              la vez y en pantallas muy angostas no caben en una sola fila. */}
+          <div className="mb-2 flex min-h-8 flex-wrap items-center justify-center gap-2.5 px-2">
+            <HemisphereChip
+              section={ADMIN_SECTION}
+              shortLabel="Configuración"
+              side="left"
+              active={activeHemisphere}
+            />
+            <HemisphereChip
+              section={DASHBOARD_MODULE}
+              shortLabel="Dashboard Neuronal"
+              side="right"
+              active={activeHemisphere}
+            />
+          </div>
+
           <BrainCore
             className="w-[300px] sm:w-[420px] md:w-[480px]"
             left={{
@@ -251,25 +281,6 @@ export default function NucleoNeuronal() {
               if (target.available !== false) goTo(target.path)
             }}
           />
-
-          {/* Fila con altura reservada: los nombres aparecen y desaparecen sin
-              mover nada de lo que viene debajo. Va más ancha que el cerebro para
-              que los dos nombres nunca se toquen, ni siquiera en un celular
-              (donde, sin cursor, se muestran los dos a la vez). */}
-          <div className="mt-1 flex h-9 w-full max-w-[600px] items-start justify-between px-2">
-            <HemisphereLabel
-              section={ADMIN_SECTION}
-              shortLabel="Configuración"
-              side="left"
-              active={activeHemisphere}
-            />
-            <HemisphereLabel
-              section={DASHBOARD_MODULE}
-              shortLabel="Dashboard Neuronal"
-              side="right"
-              active={activeHemisphere}
-            />
-          </div>
         </div>
       </section>
 
