@@ -230,7 +230,7 @@ export async function saveQuality(key: Key, metric: QualityMetric, value: number
   fail(error)
 }
 
-/** Nombre del empleado ligado al usuario (para "Gerente de CD"). */
+/** Nombre de un empleado del catálogo por id. */
 export async function fetchEmployeeName(employeeId: string): Promise<string | null> {
   const { data } = await supabase.from('admin_employees').select('full_name').eq('id', employeeId).maybeSingle()
   return (data?.full_name as string | undefined) ?? null
@@ -264,6 +264,36 @@ export async function fetchAreaLeads(): Promise<AreaLead[]> {
   return rows
     .filter((r) => r.module && names.has(r.employee_id))
     .map((r) => ({ module: r.module!, name: names.get(r.employee_id)! }))
+}
+
+/**
+ * Gerente de CD: el empleado activo con puesto "Gerente CD…" en el catálogo
+ * (admin_positions/admin_employees). Si no hay, el usuario activo con nivel
+ * `gerencia`. Así el nombre no depende de quién tenga la sesión abierta.
+ */
+export async function fetchCdManager(): Promise<string | null> {
+  const { data: pos } = await supabase.from('admin_positions').select('id').ilike('name', 'Gerente CD%')
+  const posIds = ((pos ?? []) as { id: string }[]).map((p) => p.id)
+  if (posIds.length) {
+    const { data: emps } = await supabase
+      .from('admin_employees')
+      .select('full_name')
+      .in('position_id', posIds)
+      .eq('active', true)
+      .order('created_at', { ascending: true })
+      .limit(1)
+    const name = (emps?.[0] as { full_name?: string } | undefined)?.full_name
+    if (name) return name
+  }
+  const { data: users } = await supabase
+    .from('admin_users')
+    .select('employee_id')
+    .eq('access_level', 'gerencia')
+    .eq('active', true)
+    .order('created_at', { ascending: true })
+    .limit(1)
+  const empId = (users?.[0] as { employee_id?: string } | undefined)?.employee_id
+  return empId ? fetchEmployeeName(empId) : null
 }
 
 export async function saveSafety(key: Key, values: Partial<Omit<SafetyRow, 'shift_date' | 'shift'>>) {

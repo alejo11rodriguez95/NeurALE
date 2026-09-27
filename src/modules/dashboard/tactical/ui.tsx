@@ -262,7 +262,9 @@ export function ShiftPicker({
   onDate,
   onShift,
   color,
+  compact,
 }: {
+  compact?: boolean
   date: string
   shift: ShiftId
   onDate: (d: string) => void
@@ -270,14 +272,14 @@ export function ShiftPicker({
   color: string
 }) {
   return (
-    <div className="flex flex-wrap items-end gap-3">
+    <div className={`flex items-end ${compact ? 'min-w-0 gap-2' : 'flex-wrap gap-3'}`}>
       <label className="flex flex-col gap-1">
         <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Fecha</span>
         <input
           type="date"
           value={date}
           onChange={(e) => e.target.value && onDate(e.target.value)}
-          className={`${fieldClass} min-h-9 w-auto [color-scheme:dark]`}
+          className={`${fieldClass} min-h-9 [color-scheme:dark] ${compact ? 'w-[8.2rem] px-2' : 'w-auto'}`}
           style={ringStyle(color)}
         />
       </label>
@@ -291,7 +293,7 @@ export function ShiftPicker({
               title={s.hours}
               aria-pressed={s.id === shift}
               onClick={() => onShift(s.id)}
-              className="min-h-9 px-4 font-display text-base font-semibold"
+              className={`min-h-9 font-display text-base font-semibold ${compact ? 'px-2.5' : 'px-4'}`}
               style={
                 s.id === shift
                   ? { background: color, color: '#05070d' }

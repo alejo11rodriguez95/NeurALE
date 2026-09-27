@@ -8,7 +8,7 @@ import { DASHBOARD_MODULE, MODULES, withAlpha } from '@/shared/modules'
 import {
   EMPTY_COMMITMENTS,
   fetchAreaLeads,
-  fetchEmployeeName,
+  fetchCdManager,
   saveSafety,
   saveSettings,
   saveShift,
@@ -63,14 +63,15 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
     setComp(data.shift?.commitments ?? EMPTY_COMMITMENTS)
   }, [data])
 
-  // Gerente de CD = nombre del gerente que inició sesión (se guarda con el
-  // turno la primera vez que ese gerente captura algo; luego se respeta).
-  const [managerName, setManagerName] = useState<string | null>(null)
+  // Gerente de CD = empleado con puesto "Gerente CD…" (o el usuario de nivel
+  // gerencia). No depende de quién tenga la sesión; se guarda con el turno.
+  const [cdManager, setCdManager] = useState<string | null>(null)
   useEffect(() => {
-    if (!isManager || !adminUser?.employee_id) return
-    fetchEmployeeName(adminUser.employee_id).then(setManagerName)
-  }, [isManager, adminUser?.employee_id])
-  const lead = data?.shift?.shift_lead || (isManager ? managerName : null) || null
+    fetchCdManager()
+      .then(setCdManager)
+      .catch(() => setCdManager(null))
+  }, [])
+  const lead = cdManager || data?.shift?.shift_lead || null
 
   // Jefes de turno = jefes de área activos de cada módulo (Usuarios y Roles)
   const [areaLeads, setAreaLeads] = useState<AreaLead[] | null>(null)
@@ -209,7 +210,7 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
         {!board ? (
           <div className="flex flex-1 items-center justify-center text-sm text-white/45">{error ? '' : 'Cargando diálogo táctico…'}</div>
         ) : (
-          <main className="grid flex-1 grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(300px,25%)] [@media(min-height:860px)]:lg:min-h-0">
+          <main className={`grid flex-1 grid-cols-1 gap-3 [@media(min-height:860px)]:lg:min-h-0 ${isFs ? 'lg:grid-cols-[minmax(0,1fr)_minmax(340px,28%)]' : 'lg:grid-cols-[minmax(0,1fr)_minmax(300px,25%)]'}`}>
             {/* ---------- Columna principal ---------- */}
             <div className="flex flex-col gap-3 [@media(min-height:860px)]:lg:min-h-0">
               <Matrix board={board} />
@@ -258,14 +259,19 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
             <aside className="flex flex-col gap-3 [@media(min-height:860px)]:lg:min-h-0">
               <section className="flex flex-col gap-2 rounded-2xl border border-neurale-border bg-neurale-surface p-3 backdrop-blur-md">
                 {isFs ? (
-                  // En pantalla completa el encabezado queda fuera: el logo sube aquí.
-                  <img
-                    src={LOGO}
-                    alt="CD Nneo"
-                    className="h-14 w-auto self-start rounded-lg border border-white/10 shadow-[0_4px_18px_rgba(0,0,0,0.45)]"
-                  />
-                ) : null}
-                <ShiftPicker date={date} shift={shift} onDate={live.setDate} onShift={live.setShift} color={C} />
+                  // En pantalla completa el encabezado queda fuera: el logo sube
+                  // aquí, con fecha / turno / semana a su derecha.
+                  <div className="flex items-end gap-3">
+                    <img
+                      src={LOGO}
+                      alt="CD Nneo"
+                      className="h-[3.1rem] w-auto min-w-0 shrink rounded-lg border border-white/10 object-contain shadow-[0_4px_18px_rgba(0,0,0,0.45)]"
+                    />
+                    <ShiftPicker compact date={date} shift={shift} onDate={live.setDate} onShift={live.setShift} color={C} />
+                  </div>
+                ) : (
+                  <ShiftPicker date={date} shift={shift} onDate={live.setDate} onShift={live.setShift} color={C} />
+                )}
                 <div className="flex flex-col gap-1">
                   <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Gerente de CD</span>
                   <span className="flex min-h-8 items-center rounded-lg border border-neurale-border bg-white/5 px-3 font-display text-base font-semibold tracking-wide text-white uppercase">
@@ -292,8 +298,8 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
                   </div>
                 </div>
               </section>
-              <Card title="Seguridad">
-                <div className="grid grid-cols-2 gap-1.5">
+              <Card title="Seguridad" grow>
+                <div className="grid flex-1 grid-cols-2 grid-rows-[minmax(min-content,1.25fr)_minmax(min-content,1fr)] gap-1.5">
                   <Cell
                     big
                     className="col-span-2"
@@ -366,8 +372,8 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
                 </div>
               </Card>
 
-              <Card title="Orden y equipo">
-                <div className="grid grid-cols-2 gap-1.5">
+              <Card title="Orden y equipo" grow>
+                <div className="grid flex-1 grid-cols-2 grid-rows-[minmax(min-content,1fr)_minmax(min-content,1fr)] gap-1.5">
                   <Cell
                     className="col-span-2"
                     status={board.hk.cls}
@@ -626,9 +632,17 @@ function Row({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
-function Card({ title, children }: { title: string; children: ReactNode }) {
+/**
+ * Tarjeta de la columna lateral. `grow`: en modo "cabe en pantalla" reparte
+ * la altura sobrante para que no queden huecos (las celdas se estiran).
+ */
+function Card({ title, children, grow }: { title: string; children: ReactNode; grow?: boolean }) {
   return (
-    <section className="rounded-2xl border border-neurale-border bg-neurale-surface p-3 backdrop-blur-md">
+    <section
+      className={`flex flex-col rounded-2xl border border-neurale-border bg-neurale-surface p-3 backdrop-blur-md ${
+        grow ? '[@media(min-height:860px)]:lg:flex-1' : ''
+      }`}
+    >
       <h2 className="mb-2 font-display text-sm font-semibold tracking-[0.14em] text-white/60 uppercase">{title}</h2>
       {children}
     </section>
@@ -639,7 +653,7 @@ function Summary({ board }: { board: Board }) {
   const s = board.summary
   const t = s.measured || 1
   return (
-    <section className="mt-auto grid grid-cols-[auto_repeat(4,minmax(0,1fr))] items-end gap-x-3 gap-y-2 rounded-2xl border border-neurale-border bg-neurale-surface p-3 backdrop-blur-md">
+    <section className="grid grid-cols-[auto_repeat(4,minmax(0,1fr))] items-end gap-x-3 gap-y-2 rounded-2xl border border-neurale-border bg-neurale-surface p-3 backdrop-blur-md">
       <div className="flex flex-col pr-1">
         <span className="text-[10px] tracking-wider text-white/45 uppercase">En meta</span>
         <span className="font-display text-[clamp(1.8rem,3.8vh,2.6rem)] leading-none font-semibold tabular-nums">
