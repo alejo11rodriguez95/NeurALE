@@ -7,8 +7,8 @@ import { DASHBOARD_MODULE, MODULES, withAlpha } from '@/shared/modules'
 
 import {
   EMPTY_COMMITMENTS,
-  fetchAreaLeads,
   fetchCdManager,
+  fetchProcessLeads,
   saveSafety,
   saveSettings,
   saveShift,
@@ -16,7 +16,7 @@ import {
   type Commitment,
   type ShiftRow,
 } from './api'
-import { SHIFTS, addDays } from './config'
+import { PROCESS_LEAD_POSITIONS, SHIFTS, addDays } from './config'
 import { GoalsDialog, HistoryDialog, HousekeepingDialog } from './dialogs'
 import { STATUS_COLOR, computeBoard, fmt, type Board } from './metrics'
 import { Button, Cell, NumberDialog, Ratio, ShiftPicker, fieldClass, ringStyle, type NumField } from './ui'
@@ -98,10 +98,11 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
   }, [])
   const lead = cdManager || data?.shift?.shift_lead || null
 
-  // Jefes de turno = jefes de área activos de cada módulo (Usuarios y Roles)
+  // Jefes de turno = empleado activo con el puesto correspondiente a cada
+  // módulo (catálogo de Empleados/Puestos — ver PROCESS_LEAD_POSITIONS).
   const [areaLeads, setAreaLeads] = useState<AreaLead[] | null>(null)
   useEffect(() => {
-    fetchAreaLeads()
+    fetchProcessLeads()
       .then(setAreaLeads)
       .catch(() => setAreaLeads([]))
   }, [])
@@ -377,7 +378,7 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
                 <div className="flex flex-col gap-1">
                   <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Jefes de turno</span>
                   <div className={`flex flex-col rounded-lg border border-neurale-border bg-white/5 px-3 ${isFs ? 'gap-0 py-1' : 'gap-0.5 py-1.5'}`}>
-                    {MODULES.map((m) => {
+                    {MODULES.filter((m) => m.id in PROCESS_LEAD_POSITIONS).map((m) => {
                       const names = (areaLeads ?? []).filter((l) => l.module === m.id).map((l) => l.name)
                       return (
                         <div key={m.id} className="flex min-w-0 items-baseline gap-2 text-[11px] leading-snug">

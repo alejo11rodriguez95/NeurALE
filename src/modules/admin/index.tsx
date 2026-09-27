@@ -4,6 +4,7 @@ import { AdminHome } from '@/modules/admin/AdminHome'
 import { BranchesView } from '@/modules/admin/branches/BranchesView'
 import { DocksView } from '@/modules/admin/docks/DocksView'
 import { EmployeesView } from '@/modules/admin/employees/EmployeesView'
+import { PositionsView } from '@/modules/admin/positions/PositionsView'
 import { SettingsView } from '@/modules/admin/settings/SettingsView'
 import { UsersRolesView } from '@/modules/admin/users/UsersRolesView'
 import { ModuleScreen } from '@/shared/components/ModuleScreen'
@@ -36,6 +37,7 @@ export default function AdminModule() {
           {view === 'ajustes' ? <SettingsView /> : null}
           {view === 'usuarios' ? <UsersRolesView /> : null}
           {view === 'empleados' ? <EmployeesView /> : null}
+          {view === 'puestos' ? <PositionsView /> : null}
           {view === 'muelles' ? <DocksView /> : null}
           {view === 'sucursales' ? <BranchesView /> : null}
         </div>

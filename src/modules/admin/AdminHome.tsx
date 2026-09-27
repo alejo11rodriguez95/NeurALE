@@ -39,6 +39,13 @@ export function AdminHome({ onNavigate }: { onNavigate: (view: string) => void }
       />
       <OptionCard
         color={color}
+        icon="🪪"
+        title="Puestos"
+        description="Agregar, editar o eliminar los puestos del catálogo de Empleados."
+        onClick={() => onNavigate('puestos')}
+      />
+      <OptionCard
+        color={color}
         icon="🚚"
         title="Muelles"
         description="Agregar o quitar los muelles de Outbound — Gestión de Rutas."

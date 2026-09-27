@@ -49,6 +49,8 @@ export async function updateUser(
     module?: ModuleRole | null
     active?: boolean
     password?: string
+    /** Vacío: sin correo real, inicia sesión con su código de empleado. */
+    email?: string
   },
 ): Promise<AdminUser> {
   return invokeManageUser({ action: 'update', user_id, patch })

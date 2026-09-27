@@ -1,6 +1,15 @@
+import type { ModuleId } from '@/shared/modules'
 import { supabase } from '@/lib/supabase'
 
-import { normalizeGoals, type Goals, type HkValue, type ProcessId, type QualityMetric, type ShiftId } from './config'
+import {
+  normalizeGoals,
+  PROCESS_LEAD_POSITIONS,
+  type Goals,
+  type HkValue,
+  type ProcessId,
+  type QualityMetric,
+  type ShiftId,
+} from './config'
 
 /**
  * Acceso a datos del Diálogo Táctico (tablas `dashboard_tactical_*`, ver
@@ -242,28 +251,42 @@ export interface AreaLead {
 }
 
 /**
- * Jefes de área activos por módulo (admin_users con nivel jefe_area + nombre
- * del catálogo de empleados). gerencia/admin pueden leer todos los usuarios
- * (política admin_users_select); a otros roles les regresa solo lo visible.
+ * Jefes de turno del tablero — un empleado ACTIVO por el puesto que le
+ * corresponde a cada módulo en `PROCESS_LEAD_POSITIONS` (catálogo de
+ * Empleados/Puestos, no depende de que tenga cuenta de acceso en Usuarios y
+ * Roles). Si dos empleados comparten el mismo puesto (ej. turno A y B), se
+ * muestran ambos nombres — igual que antes. Inventory queda fuera porque no
+ * tiene puesto de jefe de turno mapeado.
  */
-export async function fetchAreaLeads(): Promise<AreaLead[]> {
-  const { data: users, error } = await supabase
-    .from('admin_users')
-    .select('module, employee_id')
-    .eq('access_level', 'jefe_area')
-    .eq('active', true)
+export async function fetchProcessLeads(): Promise<AreaLead[]> {
+  const entries = Object.entries(PROCESS_LEAD_POSITIONS) as [ModuleId, string][]
+  if (!entries.length) return []
+
+  const { data: positions, error } = await supabase
+    .from('admin_positions')
+    .select('id, name')
+    .in('name', entries.map(([, positionName]) => positionName))
   fail(error)
-  const rows = (users ?? []) as { module: string | null; employee_id: string }[]
-  if (!rows.length) return []
+
+  const moduleByPositionId = new Map<string, ModuleId>()
+  for (const [module, positionName] of entries) {
+    const match = ((positions ?? []) as { id: string; name: string }[]).find((p) => p.name === positionName)
+    if (match) moduleByPositionId.set(match.id, module)
+  }
+  const positionIds = [...moduleByPositionId.keys()]
+  if (!positionIds.length) return []
+
   const { data: emps, error: e2 } = await supabase
     .from('admin_employees')
-    .select('id, full_name')
-    .in('id', rows.map((r) => r.employee_id))
+    .select('full_name, position_id')
+    .in('position_id', positionIds)
+    .eq('active', true)
+    .order('full_name', { ascending: true })
   fail(e2)
-  const names = new Map(((emps ?? []) as { id: string; full_name: string }[]).map((e) => [e.id, e.full_name]))
-  return rows
-    .filter((r) => r.module && names.has(r.employee_id))
-    .map((r) => ({ module: r.module!, name: names.get(r.employee_id)! }))
+
+  return ((emps ?? []) as { full_name: string; position_id: string }[])
+    .map((e) => ({ module: moduleByPositionId.get(e.position_id)!, name: e.full_name }))
+    .filter((r) => r.module)
 }
 
 /**

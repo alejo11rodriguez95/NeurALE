@@ -39,10 +39,12 @@ export function UsersRolesView() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  // Editar rol/módulo de un usuario ya existente (solo admin/gerencia).
+  // Editar correo/nivel/módulo/estado de un usuario ya existente (solo admin/gerencia).
   const [editTarget, setEditTarget] = useState<AdminUserWithEmployee | null>(null)
+  const [editEmail, setEditEmail] = useState('')
   const [editAccessLevel, setEditAccessLevel] = useState<AccessLevel>('operador')
   const [editModule, setEditModule] = useState<ModuleRole | ''>('')
+  const [editActive, setEditActive] = useState(true)
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState<string | null>(null)
 
@@ -110,8 +112,10 @@ export function UsersRolesView() {
   function openEdit(user: AdminUserWithEmployee) {
     setPasswordTarget(null)
     setEditTarget(user)
+    setEditEmail(user.email.endsWith('@neurale.local') ? '' : user.email)
     setEditAccessLevel(user.access_level)
     setEditModule(user.module ?? '')
+    setEditActive(user.active)
     setEditError(null)
   }
 
@@ -133,8 +137,10 @@ export function UsersRolesView() {
     setEditSaving(true)
     try {
       await updateUser(editTarget.id, {
+        email: editEmail.trim(),
         access_level: editAccessLevel,
         module: editNeedsModule ? (editModule as ModuleRole) : null,
+        active: editActive,
       })
       closeEdit()
       reload()
@@ -312,6 +318,34 @@ export function UsersRolesView() {
             </button>
           </div>
           <form onSubmit={handleEditSubmit} className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <label className={fieldLabelClass}>
+              Correo (opcional)
+              <input
+                type="email"
+                value={editEmail}
+                onChange={(e) => setEditEmail(e.target.value)}
+                placeholder="Déjalo vacío si no tiene correo"
+                className={fieldControlClass}
+                style={ringStyle(ADMIN_SECTION.color)}
+              />
+              <span className="mt-1 block text-[11px] font-normal text-white/35">
+                Sin correo, inicia sesión con su código de empleado.
+              </span>
+            </label>
+
+            <label className={fieldLabelClass}>
+              Estado
+              <select
+                value={editActive ? 'activo' : 'inactivo'}
+                onChange={(e) => setEditActive(e.target.value === 'activo')}
+                className={fieldControlClass}
+                style={ringStyle(ADMIN_SECTION.color)}
+              >
+                <option value="activo">Activo</option>
+                <option value="inactivo">Inactivo</option>
+              </select>
+            </label>
+
             <label className={fieldLabelClass}>
               Nivel de acceso
               <select

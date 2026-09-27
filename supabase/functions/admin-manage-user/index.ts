@@ -27,7 +27,10 @@
 //     alta y edición de cuentas, igual que antes. `create` deja
 //     `must_change_password = true` siempre (la contraseña que pone el
 //     admin es temporal); `update` la vuelve a poner en true cuando el
-//     admin resetea la contraseña de alguien más.
+//     admin resetea la contraseña de alguien más. `update` también puede
+//     cambiar el correo (patch.email) — se actualiza a la vez en admin_users
+//     y en el usuario real de Auth (auth.admin.updateUserById), nunca solo
+//     en una de las dos tablas.
 //
 // Reglas de negocio (además de la RLS de `admin_users`, que no permite
 // escribir esta tabla desde ningún otro lado):
@@ -78,6 +81,8 @@ interface UpdatePayload {
     module?: ModuleRole | null
     active?: boolean
     password?: string
+    /** Vacío/omitido explícito: se sintetiza `emp-<código>@neurale.local` (igual que en `create`). */
+    email?: string | null
   }
 }
 
@@ -271,7 +276,7 @@ Deno.serve(async (req) => {
 
     const { data: target, error: targetError } = await adminClient
       .from('admin_users')
-      .select('id, auth_user_id, access_level, module')
+      .select('id, employee_id, auth_user_id, access_level, module')
       .eq('id', user_id)
       .single()
 
@@ -298,8 +303,36 @@ Deno.serve(async (req) => {
       if (pwError) return json({ error: pwError.message }, 400)
     }
 
-    const { password: _password, ...rest } = patch
-    const updatePatch = patch.password ? { ...rest, must_change_password: true } : rest
+    // Editar correo: hay que actualizarlo TANTO en admin_users como en el
+    // usuario real de Supabase Auth (son dos columnas independientes) — si
+    // solo se actualizara admin_users, el login (que valida contra Auth)
+    // seguiría pidiendo el correo viejo. Vacío/omitido explícito = sin correo
+    // real, se sintetiza el mismo `emp-<código>@neurale.local` que usa `create`.
+    let nextEmail: string | undefined
+    if (patch.email !== undefined) {
+      nextEmail = patch.email?.trim() || ''
+      if (!nextEmail) {
+        const { data: employee, error: employeeError } = await adminClient
+          .from('admin_employees')
+          .select('employee_code')
+          .eq('id', target.employee_id)
+          .single()
+        if (employeeError || !employee) return json({ error: 'empleado_no_encontrado' }, 404)
+        nextEmail = `emp-${sanitizeForEmail(employee.employee_code)}@neurale.local`
+      }
+      const { error: emailError } = await adminClient.auth.admin.updateUserById(target.auth_user_id, {
+        email: nextEmail,
+        email_confirm: true,
+      })
+      if (emailError) return json({ error: emailError.message }, 400)
+    }
+
+    const { password: _password, email: _email, ...rest } = patch
+    const updatePatch = {
+      ...rest,
+      ...(nextEmail !== undefined ? { email: nextEmail } : {}),
+      ...(patch.password ? { must_change_password: true } : {}),
+    }
 
     const { data: row, error: updateError } = await adminClient
       .from('admin_users')

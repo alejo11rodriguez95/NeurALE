@@ -66,6 +66,22 @@ export function hasTacticalOption(module: string | null | undefined): boolean {
   return !!processForModule(module) || qualityMetricsForModule(module).length > 0
 }
 
+/**
+ * "Jefes de turno" del tablero: se resuelven por PUESTO del catálogo de
+ * Empleados (no por rol `jefe_area` en Usuarios y Roles — no todo jefe de
+ * turno necesita una cuenta de acceso a NeurALE). Decisión 2026-09-26,
+ * excepción de Configuraciones y Administradores sobre este archivo del
+ * Dashboard Neuronal (ver ARCHITECTURE.md → "Roles y accesos"). Inventory no
+ * tiene puesto de jefe de turno propio, por eso no aparece aquí — y por lo
+ * tanto tampoco en esa fila del tablero.
+ */
+export const PROCESS_LEAD_POSITIONS: Partial<Record<ModuleId, string>> = {
+  inbound: 'Jefe de Recepción',
+  storage: 'Jefe de Almacenamiento',
+  picking: 'Jefe de Preparación',
+  outbound: 'Jefe de Despacho',
+}
+
 export const SHIFTS: { id: ShiftId; hours: string }[] = [
   { id: 'A', hours: '06:00–14:00' },
   { id: 'B', hours: '14:00–22:00' },
