@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 
 import { useAuth } from '@/shared/auth/AuthContext'
+import { canManageModule } from '@/shared/auth/RequireAccess'
 import { GlassCard } from '@/shared/components/GlassCard'
 import { MODULES, type ModuleId } from '@/shared/modules'
 
@@ -37,8 +38,11 @@ export function TacticalCaptureView({ moduleId }: { moduleId: ModuleId }) {
   const proc = processForModule(moduleId)
   const qMetrics = qualityMetricsForModule(moduleId)
   const color = mod.color
-  const isManager = adminUser?.access_level === 'admin' || adminUser?.access_level === 'gerencia'
-  const canEdit = isManager || (adminUser?.access_level === 'jefe_area' && adminUser.module === moduleId)
+  // 2026-09-29: además de admin/gerencia/jefe_area del módulo (de siempre),
+  // un nivel de acceso con "editar" en este módulo también puede capturar —
+  // ver ARCHITECTURE.md → "Niveles de acceso (catálogo dinámico)" →
+  // "Ampliación 2026-09-29: acceso real dentro de cada módulo".
+  const canEdit = canManageModule(adminUser, moduleId)
 
   const [date, setDate] = useState(todaySV)
   const [shift, setShift] = useState<ShiftId>(currentShiftSV)

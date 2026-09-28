@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 
 import type { AdminUser } from '@/lib/supabase'
 import { fieldControlClass, fieldLabelClass, ringStyle } from '@/modules/outbound/components/formStyles'
+import { canManageModule, hasModuleAccess } from '@/shared/auth/RequireAccess'
 import { withAlpha } from '@/shared/modules'
 
 import { ISQ_STATUS_COLORS, ISQ_STATUS_LABELS, addDaysISO, subscribeIsq, todaySV, type IsqStatus } from './lib/isq'
@@ -19,15 +20,20 @@ export { fieldControlClass, fieldLabelClass, ringStyle }
 
 export const isManager = (u: AdminUser | null) => !!u && (u.access_level === 'admin' || u.access_level === 'gerencia')
 
-/** Ajustes de Storage: jefe de área de Storage, gerencia o admin. */
-export const canConfigureIsq = (u: AdminUser | null) =>
-  isManager(u) || (!!u && u.access_level === 'jefe_area' && u.module === 'storage')
+/**
+ * Ajustes de Storage: jefe de área de Storage, gerencia o admin — o, desde
+ * 2026-09-29, un nivel de acceso con "editar" en Storage (ver ARCHITECTURE.md
+ * → "Niveles de acceso (catálogo dinámico)" → "Ampliación 2026-09-29: acceso
+ * real dentro de cada módulo"). `canManageModule` ya cubre admin/gerencia/
+ * jefe_area de siempre.
+ */
+export const canConfigureIsq = (u: AdminUser | null) => canManageModule(u, 'storage')
 
-/** Reportar ISQ: cualquier usuario de Storage, gerencia o admin. */
-export const canReportIsq = (u: AdminUser | null) => isManager(u) || u?.module === 'storage'
+/** Reportar ISQ: cualquier usuario de Storage (o con acceso vía su nivel), gerencia o admin. */
+export const canReportIsq = (u: AdminUser | null) => hasModuleAccess(u, 'storage')
 
-/** Seguimiento en Inbound: cualquier usuario de Inbound, gerencia o admin. */
-export const canFollowUpIsq = (u: AdminUser | null) => isManager(u) || u?.module === 'inbound'
+/** Seguimiento en Inbound: cualquier usuario de Inbound (o con acceso vía su nivel), gerencia o admin. */
+export const canFollowUpIsq = (u: AdminUser | null) => hasModuleAccess(u, 'inbound')
 
 /* ---------- Componentes ---------- */
 

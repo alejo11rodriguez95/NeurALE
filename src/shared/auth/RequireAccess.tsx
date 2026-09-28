@@ -58,6 +58,41 @@ export function RequireAccess({
 }
 
 /**
+ * ¿Este usuario tiene ALGÚN acceso (ver o editar) a este destino? admin/
+ * gerencia siempre; jefe_area/operador por su `module` de siempre; cualquier
+ * nivel (incluido jefe_area/operador con acceso EXTRA, o un nivel
+ * personalizado) por su matriz en `admin_access_level_modules`. Es el mismo
+ * chequeo que ya usaba `allowModule` — se nombra aparte para que otros chats
+ * de módulo (Dashboard, Storage) lo reutilicen en vez de comparar
+ * `access_level === 'jefe_area'` a mano (ver ARCHITECTURE.md → "Niveles de
+ * acceso (catálogo dinámico)" → "Ampliación 2026-09-29: acceso real dentro
+ * de cada módulo"). Acepta `null` para no obligar a los call sites (varios
+ * módulos manejan `AdminUser | null`) a chequear antes.
+ */
+export function hasModuleAccess(user: AdminUser | null, moduleId: AccessDestination): boolean {
+  if (!user) return false
+  if (user.access_level === 'admin' || user.access_level === 'gerencia') return true
+  if (user.module === moduleId) return true
+  return !!user.moduleAccess?.[moduleId]
+}
+
+/**
+ * ¿Este usuario puede GESTIONAR este destino (el mismo nivel que ya tenía
+ * jefe_area de ese módulo: capturar el Diálogo Táctico, configurar el ISQ de
+ * Storage, etc.)? admin/gerencia siempre; jefe_area por su `module` de
+ * siempre; cualquier nivel con 'editar' en su matriz para ese destino —
+ * incluido un nivel personalizado, o jefe_area/operador con 'editar' EXTRA
+ * agregado en Niveles de Acceso. 'ver' en la matriz da entrada
+ * (`hasModuleAccess`) pero no gestión.
+ */
+export function canManageModule(user: AdminUser | null, moduleId: AccessDestination): boolean {
+  if (!user) return false
+  if (user.access_level === 'admin' || user.access_level === 'gerencia') return true
+  if (user.access_level === 'jefe_area' && user.module === moduleId) return true
+  return user.moduleAccess?.[moduleId] === 'editar'
+}
+
+/**
  * admin/gerencia entran a todo. Los demás niveles (jefe_area/operador/custom)
  * entran por su regla de siempre (jefe_area/operador: su único `module`; sin
  * regla propia para custom) MÁS lo que su nivel tenga de EXTRA en
@@ -69,11 +104,7 @@ export function RequireAccess({
  * Es puramente aditivo: nunca le quita a nadie el acceso que ya tenía.
  */
 export function allowModule(moduleId: AccessDestination) {
-  return (user: AdminUser) => {
-    if (user.access_level === 'admin' || user.access_level === 'gerencia') return true
-    if (user.module === moduleId) return true
-    return !!user.moduleAccess?.[moduleId]
-  }
+  return (user: AdminUser) => hasModuleAccess(user, moduleId)
 }
 
 /** Dashboard Neuronal: transversales, o cualquier nivel con ese destino extra en su matriz. */
