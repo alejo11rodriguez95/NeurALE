@@ -1,26 +1,40 @@
 import { useEffect, useState } from 'react'
 
-import type { AccessLevel, ModuleRole } from '@/lib/supabase'
+import type { ModuleRole } from '@/lib/supabase'
 import { fieldControlClass, fieldLabelClass, ringStyle } from '@/modules/admin/components/formStyles'
 import { fetchEmployees, type Employee } from '@/modules/admin/lib/employees'
+import { fetchAccessLevels, type AccessLevelWithModules } from '@/modules/admin/lib/accessLevels'
 import { createUser, fetchUsers, updateUser, type AdminUserWithEmployee } from '@/modules/admin/lib/users'
 import { GlassCard } from '@/shared/components/GlassCard'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { ADMIN_SECTION, MODULES } from '@/shared/modules'
 
-const ACCESS_LEVEL_LABEL: Record<AccessLevel, string> = {
+/** Solo para si por lo que sea el join `access_level_ref` viniera vacío (dato viejo sin backfill). */
+const LEGACY_LABEL_FALLBACK: Record<string, string> = {
   admin: 'Admin',
   gerencia: 'Gerencia',
   jefe_area: 'Jefe de área',
   operador: 'Operador',
+  custom: 'Personalizado',
+}
+
+function levelDisplayName(u: AdminUserWithEmployee): string {
+  return u.access_level_ref?.name ?? LEGACY_LABEL_FALLBACK[u.access_level] ?? u.access_level
+}
+
+/** Un nivel "necesita módulo por usuario" cuando es el nivel de sistema Jefe de área/Operador. */
+function levelNeedsModule(level: AccessLevelWithModules | undefined): boolean {
+  return level?.legacy_key === 'jefe_area' || level?.legacy_key === 'operador'
 }
 
 /**
- * Crear cuentas de acceso real y asignar rol/módulo a empleados ya
- * registrados en el catálogo de Empleados. Un jefe_area solo puede crear
- * usuarios `operador` dentro de su propio módulo — la Edge Function
- * `admin-manage-user` valida lo mismo del lado del servidor, esto solo
- * simplifica la pantalla para que no vea opciones que no puede usar.
+ * Crear cuentas de acceso real y asignar el nivel de acceso (catálogo de
+ * "Niveles de Acceso" — ver ARCHITECTURE.md → "Roles y accesos" → "Niveles
+ * de acceso (catálogo dinámico)") a empleados ya registrados. Un jefe_area
+ * solo puede crear usuarios con el nivel de sistema "Operador" dentro de su
+ * propio módulo — la Edge Function `admin-manage-user` valida lo mismo del
+ * lado del servidor, esto solo simplifica la pantalla para que no vea
+ * opciones que no puede usar.
  */
 export function UsersRolesView() {
   const { adminUser } = useAuth()
@@ -28,13 +42,14 @@ export function UsersRolesView() {
 
   const [users, setUsers] = useState<AdminUserWithEmployee[]>([])
   const [employees, setEmployees] = useState<Employee[]>([])
+  const [levels, setLevels] = useState<AccessLevelWithModules[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
 
   const [employeeId, setEmployeeId] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [accessLevel, setAccessLevel] = useState<AccessLevel>(isJefeArea ? 'operador' : 'operador')
+  const [accessLevelId, setAccessLevelId] = useState('')
   const [module, setModule] = useState<ModuleRole | ''>(isJefeArea ? (adminUser?.module ?? '') : '')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -42,7 +57,7 @@ export function UsersRolesView() {
   // Editar correo/nivel/módulo/estado de un usuario ya existente (solo admin/gerencia).
   const [editTarget, setEditTarget] = useState<AdminUserWithEmployee | null>(null)
   const [editEmail, setEditEmail] = useState('')
-  const [editAccessLevel, setEditAccessLevel] = useState<AccessLevel>('operador')
+  const [editAccessLevelId, setEditAccessLevelId] = useState('')
   const [editModule, setEditModule] = useState<ModuleRole | ''>('')
   const [editActive, setEditActive] = useState(true)
   const [editSaving, setEditSaving] = useState(false)
@@ -55,27 +70,38 @@ export function UsersRolesView() {
   const [passwordError, setPasswordError] = useState<string | null>(null)
 
   function reload() {
-    Promise.all([fetchUsers(), fetchEmployees()]).then(([u, e]) => {
+    Promise.all([fetchUsers(), fetchEmployees(), fetchAccessLevels()]).then(([u, e, l]) => {
       setUsers(u)
       setEmployees(e.filter((emp) => emp.active))
+      setLevels(l)
+      // jefe_area siempre crea con el nivel de sistema "Operador" — se fija
+      // en cuanto el catálogo carga (antes era un valor hardcodeado).
+      if (isJefeArea) {
+        const operador = l.find((lvl) => lvl.legacy_key === 'operador')
+        if (operador) setAccessLevelId((prev) => prev || operador.id)
+      }
     })
   }
 
   useEffect(() => {
     reload()
     setLoading(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const availableAccessLevels: AccessLevel[] = isJefeArea
-    ? ['operador']
-    : ['admin', 'gerencia', 'jefe_area', 'operador']
+  // Nivel de acceso disponible para crear: jefe_area solo ve "Operador"
+  // (igual que antes); el resto ve todos los niveles activos.
+  const availableLevels = isJefeArea
+    ? levels.filter((l) => l.legacy_key === 'operador')
+    : levels.filter((l) => l.active)
 
-  const needsModule = accessLevel === 'jefe_area' || accessLevel === 'operador'
+  const selectedLevel = levels.find((l) => l.id === accessLevelId)
+  const needsModule = levelNeedsModule(selectedLevel)
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     setError(null)
-    if (!employeeId || !password.trim()) return
+    if (!employeeId || !password.trim() || !accessLevelId) return
     if (needsModule && !module) {
       setError('Selecciona el módulo para este nivel de acceso.')
       return
@@ -86,7 +112,7 @@ export function UsersRolesView() {
         employee_id: employeeId,
         email: email.trim(),
         password,
-        access_level: accessLevel,
+        access_level_id: accessLevelId,
         module: needsModule ? (module as ModuleRole) : null,
       })
       setEmployeeId('')
@@ -113,7 +139,7 @@ export function UsersRolesView() {
     setPasswordTarget(null)
     setEditTarget(user)
     setEditEmail(user.email.endsWith('@neurale.local') ? '' : user.email)
-    setEditAccessLevel(user.access_level)
+    setEditAccessLevelId(user.access_level_id ?? '')
     setEditModule(user.module ?? '')
     setEditActive(user.active)
     setEditError(null)
@@ -124,12 +150,21 @@ export function UsersRolesView() {
     setEditError(null)
   }
 
-  const editNeedsModule = editAccessLevel === 'jefe_area' || editAccessLevel === 'operador'
+  // Incluye el nivel que el usuario ya tiene aunque esté desactivado, para
+  // que no desaparezca del select mientras se edita (solo se ofrecen
+  // niveles activos para ELEGIR uno nuevo).
+  const editableLevels = levels.filter((l) => l.active || l.id === editTarget?.access_level_id)
+  const editSelectedLevel = levels.find((l) => l.id === editAccessLevelId)
+  const editNeedsModule = levelNeedsModule(editSelectedLevel)
 
   async function handleEditSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!editTarget) return
     setEditError(null)
+    if (!editAccessLevelId) {
+      setEditError('Selecciona un nivel de acceso.')
+      return
+    }
     if (editNeedsModule && !editModule) {
       setEditError('Selecciona el módulo para este nivel de acceso.')
       return
@@ -138,7 +173,7 @@ export function UsersRolesView() {
     try {
       await updateUser(editTarget.id, {
         email: editEmail.trim(),
-        access_level: editAccessLevel,
+        access_level_id: editAccessLevelId,
         module: editNeedsModule ? (editModule as ModuleRole) : null,
         active: editActive,
       })
@@ -259,15 +294,17 @@ export function UsersRolesView() {
           <label className={fieldLabelClass}>
             Nivel de acceso
             <select
-              value={accessLevel}
-              onChange={(e) => setAccessLevel(e.target.value as AccessLevel)}
+              value={accessLevelId}
+              onChange={(e) => setAccessLevelId(e.target.value)}
               className={fieldControlClass}
               style={ringStyle(ADMIN_SECTION.color)}
               disabled={isJefeArea}
+              required
             >
-              {availableAccessLevels.map((level) => (
-                <option key={level} value={level}>
-                  {ACCESS_LEVEL_LABEL[level]}
+              <option value="">— Selecciona —</option>
+              {availableLevels.map((level) => (
+                <option key={level.id} value={level.id}>
+                  {level.name}
                 </option>
               ))}
             </select>
@@ -349,14 +386,17 @@ export function UsersRolesView() {
             <label className={fieldLabelClass}>
               Nivel de acceso
               <select
-                value={editAccessLevel}
-                onChange={(e) => setEditAccessLevel(e.target.value as AccessLevel)}
+                value={editAccessLevelId}
+                onChange={(e) => setEditAccessLevelId(e.target.value)}
                 className={fieldControlClass}
                 style={ringStyle(ADMIN_SECTION.color)}
+                required
               >
-                {(['admin', 'gerencia', 'jefe_area', 'operador'] as AccessLevel[]).map((level) => (
-                  <option key={level} value={level}>
-                    {ACCESS_LEVEL_LABEL[level]}
+                <option value="">— Selecciona —</option>
+                {editableLevels.map((level) => (
+                  <option key={level.id} value={level.id}>
+                    {level.name}
+                    {!level.active ? ' (inactivo)' : ''}
                   </option>
                 ))}
               </select>
@@ -481,7 +521,7 @@ export function UsersRolesView() {
                     ? `Código ${u.employee?.employee_code ?? '—'} (sin correo)`
                     : u.email}
                 </td>
-                <td className="px-4 py-3 text-white/55">{ACCESS_LEVEL_LABEL[u.access_level]}</td>
+                <td className="px-4 py-3 text-white/55">{levelDisplayName(u)}</td>
                 <td className="px-4 py-3 text-white/55">
                   {u.module ? MODULES.find((m) => m.id === u.module)?.label ?? u.module : '—'}
                 </td>

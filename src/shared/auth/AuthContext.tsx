@@ -36,12 +36,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data } = await supabase
       .from('admin_users')
       .select(
-        'id, employee_id, auth_user_id, email, access_level, module, active, must_change_password, created_at',
+        'id, employee_id, auth_user_id, email, access_level, module, active, must_change_password, created_at, access_level_id',
       )
       .eq('auth_user_id', userId)
       .eq('active', true)
       .maybeSingle()
-    setAdminUser((data as AdminUser | null) ?? null)
+
+    const user = (data as AdminUser | null) ?? null
+
+    // Nivel de acceso "custom" (ver ARCHITECTURE.md → "Niveles de acceso
+    // (catálogo dinámico)"): admin/gerencia/jefe_area/operador siguen
+    // resolviéndose solo con access_level/module (como siempre); solo un
+    // nivel custom necesita esta consulta extra para saber a qué puede
+    // entrar y con qué permiso (ver/editar).
+    if (user && user.access_level === 'custom' && user.access_level_id) {
+      const { data: modules } = await supabase
+        .from('admin_access_level_modules')
+        .select('module, permission')
+        .eq('access_level_id', user.access_level_id)
+      user.moduleAccess = Object.fromEntries(
+        (modules ?? []).map((m) => [m.module, m.permission]),
+      ) as AdminUser['moduleAccess']
+    }
+
+    setAdminUser(user)
   }
 
   useEffect(() => {

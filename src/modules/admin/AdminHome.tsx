@@ -30,6 +30,15 @@ export function AdminHome({ onNavigate }: { onNavigate: (view: string) => void }
         description="Crear cuentas de acceso y asignar rol/módulo a los empleados ya registrados."
         onClick={() => onNavigate('usuarios')}
       />
+      {isTransversal ? (
+        <OptionCard
+          color={color}
+          icon="🛡️"
+          title="Niveles de Acceso"
+          description="Crear niveles de acceso a la medida: a qué módulos entran y si pueden ver o editar."
+          onClick={() => onNavigate('niveles')}
+        />
+      ) : null}
       <OptionCard
         color={color}
         icon="🧾"

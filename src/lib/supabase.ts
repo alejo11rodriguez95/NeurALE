@@ -36,6 +36,11 @@ export const supabase = createClient(supabaseUrl ?? '', supabaseAnonKey ?? '')
  *     aunque hoy ambos puedan crear/editar cualquier usuario.
  *   - `jefe_area`: administra los operadores de su propio módulo.
  *   - `operador`: opera dentro de su propio módulo, sin permisos de gestión.
+ *   - `custom` (agregado 2026-09-28 — ver ARCHITECTURE.md → "Niveles de
+ *     acceso (catálogo dinámico)"): el usuario tiene asignado un nivel de
+ *     acceso creado desde la pantalla "Niveles de Acceso" (tabla
+ *     `admin_access_levels`), con su propia matriz de módulos + ver/editar
+ *     (`admin_access_level_modules`) en vez de un único `module` fijo.
  *
  * `UserRole` se mantiene como alias de compatibilidad — antes de la decisión
  * del 2026-09-16, mezclaba "módulo" y "gerencia" en un solo valor.
@@ -47,7 +52,12 @@ export type ModuleRole =
   | 'outbound'
   | 'inventory'
 
-export type AccessLevel = 'admin' | 'gerencia' | 'jefe_area' | 'operador'
+/** Los 7 destinos que un nivel de acceso "custom" puede cubrir (ver `AnyModuleId` en `shared/modules.ts`). */
+export type AccessDestination = ModuleRole | 'dashboard' | 'admin'
+
+export type AccessLevel = 'admin' | 'gerencia' | 'jefe_area' | 'operador' | 'custom'
+
+export type ModulePermission = 'ver' | 'editar'
 
 export type UserRole = ModuleRole | 'gerencia'
 
@@ -63,4 +73,13 @@ export interface AdminUser {
   /** true = la contraseña la puso un admin (temporal); debe cambiarla antes de entrar a cualquier módulo. */
   must_change_password: boolean
   created_at: string
+  /** Nivel del catálogo `admin_access_levels` asignado (ver "Niveles de acceso (catálogo dinámico)"). */
+  access_level_id: string | null
+  /**
+   * Solo se llena cuando `access_level === 'custom'`: mapa destino → permiso,
+   * resuelto por `AuthContext` desde `admin_access_level_modules`. Los demás
+   * niveles (admin/gerencia/jefe_area/operador) siguen resolviéndose con las
+   * reglas de siempre en `RequireAccess` — esto no les aplica.
+   */
+  moduleAccess?: Partial<Record<AccessDestination, ModulePermission>>
 }

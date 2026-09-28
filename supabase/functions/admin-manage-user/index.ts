@@ -24,7 +24,13 @@
 //     contraseña (eso lo hace el frontend directo con `auth.updateUser`,
 //     sin pasar por aquí — esta acción solo actualiza la bandera).
 //   - create / update (requieren sesión con nivel admin/gerencia/jefe_area):
-//     alta y edición de cuentas, igual que antes. `create` deja
+//     alta y edición de cuentas. Desde 2026-09-28 (ver ARCHITECTURE.md →
+//     "Niveles de acceso (catálogo dinámico)"), el frontend manda
+//     `access_level_id` (un id de `admin_access_levels`) en vez de un
+//     `access_level` de texto: esta función es la que resuelve, del lado
+//     del servidor, a qué `access_level`/`module` reales de `admin_users`
+//     equivale ese nivel (vía su `legacy_key`) — nunca confía en un
+//     access_level/module que mande el cliente directamente. `create` deja
 //     `must_change_password = true` siempre (la contraseña que pone el
 //     admin es temporal); `update` la vuelve a poner en true cuando el
 //     admin resetea la contraseña de alguien más. `update` también puede
@@ -35,9 +41,11 @@
 // Reglas de negocio (además de la RLS de `admin_users`, que no permite
 // escribir esta tabla desde ningún otro lado):
 //   - admin / gerencia: pueden crear o editar cualquier usuario, con
-//     cualquier access_level y módulo.
-//   - jefe_area: solo puede crear/editar usuarios con access_level
-//     'operador' dentro de su propio módulo.
+//     cualquier nivel de acceso (de sistema o "custom") y módulo.
+//   - jefe_area: solo puede crear/editar usuarios con el nivel de sistema
+//     "Operador" dentro de su propio módulo — nunca un nivel "custom" (eso
+//     lo sigue reservando a admin/gerencia: `callerCanApply` rechaza
+//     cualquier access_level resultante que no sea 'operador').
 //   - operador: no puede crear ni editar usuarios.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2'
@@ -52,7 +60,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-type AccessLevel = 'admin' | 'gerencia' | 'jefe_area' | 'operador'
+type AccessLevel = 'admin' | 'gerencia' | 'jefe_area' | 'operador' | 'custom'
 type ModuleRole = 'inbound' | 'storage' | 'picking' | 'outbound' | 'inventory'
 
 interface ResolveLoginPayload {
@@ -69,7 +77,9 @@ interface CreatePayload {
   employee_id: string
   email: string | null
   password: string
-  access_level: AccessLevel
+  /** Id de `admin_access_levels` — esta función resuelve el access_level/module real. */
+  access_level_id: string
+  /** Solo se usa si el nivel resuelve a 'jefe_area'/'operador' (los únicos con módulo por usuario). */
   module: ModuleRole | null
 }
 
@@ -77,7 +87,8 @@ interface UpdatePayload {
   action: 'update'
   user_id: string
   patch: {
-    access_level?: AccessLevel
+    /** Cambiar de nivel de acceso (opcional). Igual que en `create`, resuelto server-side. */
+    access_level_id?: string
     module?: ModuleRole | null
     active?: boolean
     password?: string
@@ -96,11 +107,18 @@ function json(body: unknown, status = 200) {
 }
 
 function shapeOk(access_level: AccessLevel, module: string | null) {
-  if (access_level === 'admin' || access_level === 'gerencia') return module === null
+  if (access_level === 'admin' || access_level === 'gerencia' || access_level === 'custom') {
+    return module === null
+  }
   return !!module
 }
 
-/** El nivel de acceso del caller le permite dejar el registro resultante como quedaría. */
+/**
+ * El nivel de acceso del caller le permite dejar el registro resultante como
+ * quedaría. Un jefe_area SOLO puede aplicar el nivel de sistema 'operador'
+ * dentro de su propio módulo — nunca 'custom' (un nivel creado desde la
+ * pantalla "Niveles de Acceso" siempre requiere admin/gerencia).
+ */
 function callerCanApply(
   caller: { access_level: AccessLevel; module: string | null },
   target: { access_level: AccessLevel; module: string | null },
@@ -110,6 +128,30 @@ function callerCanApply(
     return target.access_level === 'operador' && target.module === caller.module
   }
   return false
+}
+
+/** Resuelve un `access_level_id` del catálogo al access_level/module reales de `admin_users`. */
+async function resolveAccessLevel(
+  adminClient: ReturnType<typeof createClient>,
+  accessLevelId: string,
+  requestedModule: ModuleRole | null,
+): Promise<
+  | { ok: true; access_level: AccessLevel; module: ModuleRole | null }
+  | { ok: false; error: string; status: number }
+> {
+  const { data: level, error } = await adminClient
+    .from('admin_access_levels')
+    .select('id, legacy_key, active')
+    .eq('id', accessLevelId)
+    .single()
+
+  if (error || !level) return { ok: false, error: 'nivel_de_acceso_no_encontrado', status: 404 }
+  if (!level.active) return { ok: false, error: 'nivel_de_acceso_inactivo', status: 400 }
+
+  const access_level = (level.legacy_key ?? 'custom') as AccessLevel
+  const module = access_level === 'jefe_area' || access_level === 'operador' ? requestedModule : null
+
+  return { ok: true, access_level, module }
 }
 
 /** Sanitiza un código de empleado para usarlo como parte local de un correo interno. */
@@ -211,12 +253,17 @@ Deno.serve(async (req) => {
   const caller = { access_level: callerRow.access_level as AccessLevel, module: callerRow.module as string | null }
 
   if (payload.action === 'create') {
-    const { employee_id, password, access_level, module } = payload
+    const { employee_id, password, access_level_id, module: requestedModule } = payload
     let email = payload.email?.trim() || ''
 
-    if (!employee_id || !password || !access_level) {
+    if (!employee_id || !password || !access_level_id) {
       return json({ error: 'faltan_campos' }, 400)
     }
+
+    const resolved = await resolveAccessLevel(adminClient, access_level_id, requestedModule)
+    if (!resolved.ok) return json({ error: resolved.error }, resolved.status)
+    const { access_level, module } = resolved
+
     if (!shapeOk(access_level, module)) {
       return json({ error: 'modulo_invalido_para_ese_nivel' }, 400)
     }
@@ -255,10 +302,11 @@ Deno.serve(async (req) => {
         email,
         access_level,
         module,
+        access_level_id,
         created_by: authData.user.id,
         must_change_password: true,
       })
-      .select('id, employee_id, email, access_level, module, active, must_change_password, created_at')
+      .select('id, employee_id, email, access_level, module, access_level_id, active, must_change_password, created_at')
       .single()
 
     if (insertError) {
@@ -276,14 +324,29 @@ Deno.serve(async (req) => {
 
     const { data: target, error: targetError } = await adminClient
       .from('admin_users')
-      .select('id, employee_id, auth_user_id, access_level, module')
+      .select('id, employee_id, auth_user_id, access_level, module, access_level_id')
       .eq('id', user_id)
       .single()
 
     if (targetError || !target) return json({ error: 'usuario_no_encontrado' }, 404)
 
-    const nextAccessLevel = patch.access_level ?? target.access_level
-    const nextModule = patch.module !== undefined ? patch.module : target.module
+    // Cambiar de nivel de acceso (patch.access_level_id): se resuelve server-side,
+    // igual que en `create`. Sin eso, un `patch.module` suelto solo mueve de
+    // módulo a un jefe_area/operador que ya tenía ese nivel (sin cambiarlo).
+    let nextAccessLevel = target.access_level as AccessLevel
+    let nextModule = target.module as ModuleRole | null
+    let nextAccessLevelId = target.access_level_id as string | null
+    const levelOrModuleChanged = patch.access_level_id !== undefined || patch.module !== undefined
+
+    if (patch.access_level_id !== undefined) {
+      const resolved = await resolveAccessLevel(adminClient, patch.access_level_id, patch.module ?? null)
+      if (!resolved.ok) return json({ error: resolved.error }, resolved.status)
+      nextAccessLevel = resolved.access_level
+      nextModule = resolved.module
+      nextAccessLevelId = patch.access_level_id
+    } else if (patch.module !== undefined) {
+      nextModule = patch.module
+    }
 
     if (!shapeOk(nextAccessLevel, nextModule)) {
       return json({ error: 'modulo_invalido_para_ese_nivel' }, 400)
@@ -327,9 +390,12 @@ Deno.serve(async (req) => {
       if (emailError) return json({ error: emailError.message }, 400)
     }
 
-    const { password: _password, email: _email, ...rest } = patch
+    const { password: _password, email: _email, access_level_id: _ali, module: _mod, ...rest } = patch
     const updatePatch = {
       ...rest,
+      ...(levelOrModuleChanged
+        ? { access_level: nextAccessLevel, module: nextModule, access_level_id: nextAccessLevelId }
+        : {}),
       ...(nextEmail !== undefined ? { email: nextEmail } : {}),
       ...(patch.password ? { must_change_password: true } : {}),
     }
@@ -338,7 +404,7 @@ Deno.serve(async (req) => {
       .from('admin_users')
       .update(updatePatch)
       .eq('id', user_id)
-      .select('id, employee_id, email, access_level, module, active, must_change_password, created_at')
+      .select('id, employee_id, email, access_level, module, access_level_id, active, must_change_password, created_at')
       .single()
 
     if (updateError) return json({ error: updateError.message }, 400)

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import { Navigate, useLocation } from 'react-router-dom'
 
-import type { AdminUser } from '@/lib/supabase'
+import type { AccessDestination, AdminUser } from '@/lib/supabase'
 
 import { useAuth } from './AuthContext'
 import { ForcePasswordChange } from './ForcePasswordChange'
@@ -57,20 +57,29 @@ export function RequireAccess({
   return <>{children}</>
 }
 
-/** admin/gerencia entran a todo; jefe_area/operador solo a su propio módulo. */
-export function allowModule(moduleId: string) {
-  return (user: AdminUser) =>
-    user.access_level === 'admin' ||
-    user.access_level === 'gerencia' ||
-    user.module === moduleId
+/**
+ * admin/gerencia entran a todo; jefe_area/operador solo a su propio módulo;
+ * un nivel de acceso "custom" (ver ARCHITECTURE.md → "Niveles de acceso
+ * (catálogo dinámico)") entra a lo que su matriz de módulos le asigne (ver o
+ * editar, cualquiera de los dos cuenta como acceso a la pantalla).
+ */
+export function allowModule(moduleId: AccessDestination) {
+  return (user: AdminUser) => {
+    if (user.access_level === 'admin' || user.access_level === 'gerencia') return true
+    if (user.access_level === 'custom') return !!user.moduleAccess?.[moduleId]
+    return user.module === moduleId
+  }
 }
 
-/** Dashboard Neuronal: solo transversales. */
+/** Dashboard Neuronal: transversales, o un nivel custom con ese destino en su matriz. */
 export function allowDashboard(user: AdminUser) {
-  return user.access_level === 'admin' || user.access_level === 'gerencia'
+  if (user.access_level === 'admin' || user.access_level === 'gerencia') return true
+  if (user.access_level === 'custom') return !!user.moduleAccess?.dashboard
+  return false
 }
 
-/** Configuraciones y Administradores: todo menos operador. */
+/** Configuraciones y Administradores: todo menos operador, o un custom con ese destino en su matriz. */
 export function allowAdminSection(user: AdminUser) {
+  if (user.access_level === 'custom') return !!user.moduleAccess?.admin
   return user.access_level !== 'operador'
 }

@@ -1,4 +1,4 @@
-import type { AccessLevel, AdminUser, ModuleRole } from '@/lib/supabase'
+import type { AdminUser, ModuleRole } from '@/lib/supabase'
 import { supabase } from '@/lib/supabase'
 
 /**
@@ -10,13 +10,15 @@ import { supabase } from '@/lib/supabase'
  */
 export interface AdminUserWithEmployee extends AdminUser {
   employee?: { employee_code: string; full_name: string } | null
+  /** Nombre del nivel de acceso asignado (join a `admin_access_levels` — ver "Niveles de acceso"). */
+  access_level_ref?: { name: string; legacy_key: string | null } | null
 }
 
 export async function fetchUsers(): Promise<AdminUserWithEmployee[]> {
   const { data, error } = await supabase
     .from('admin_users')
     .select(
-      'id, employee_id, auth_user_id, email, access_level, module, active, must_change_password, created_at, employee:admin_employees(employee_code, full_name)',
+      'id, employee_id, auth_user_id, email, access_level, module, access_level_id, active, must_change_password, created_at, employee:admin_employees(employee_code, full_name), access_level_ref:admin_access_levels(name, legacy_key)',
     )
     .order('created_at', { ascending: false })
 
@@ -26,7 +28,25 @@ export async function fetchUsers(): Promise<AdminUserWithEmployee[]> {
 
 async function invokeManageUser(body: Record<string, unknown>) {
   const { data, error } = await supabase.functions.invoke('admin-manage-user', { body })
-  if (error) throw error
+  if (error) {
+    // supabase-js solo da un mensaje genérico ("Edge Function returned a
+    // non-2xx status code") cuando la función responde con un error: el
+    // motivo real (ej. "correo ya registrado", "sin permiso...") va en el
+    // cuerpo JSON de esa respuesta (`{ error: "..." }`), accesible aparte
+    // en `error.context` (la Response cruda, sin leer todavía) — si no se
+    // lee ahí, se pierde y solo se ve el mensaje genérico.
+    const context = (error as { context?: Response }).context
+    let detail: string | undefined
+    if (context && typeof context.json === 'function') {
+      try {
+        const errorBody = await context.json()
+        detail = typeof errorBody?.error === 'string' ? errorBody.error : undefined
+      } catch {
+        // el cuerpo no era JSON legible (o ya se había leído) — se usa el mensaje genérico
+      }
+    }
+    throw new Error(detail ?? error.message)
+  }
   if (data?.error) throw new Error(data.error)
   return data.data
 }
@@ -36,7 +56,9 @@ export async function createUser(input: {
   /** Vacío/omitido: el empleado no tiene correo real, inicia sesión con su código de empleado. */
   email?: string
   password: string
-  access_level: AccessLevel
+  /** Id de `admin_access_levels` (ver "Niveles de acceso") — reemplaza al access_level de texto suelto. */
+  access_level_id: string
+  /** Solo se usa si el nivel elegido resuelve a 'jefe_area'/'operador'. */
   module: ModuleRole | null
 }): Promise<AdminUser> {
   return invokeManageUser({ action: 'create', ...input, email: input.email || null })
@@ -45,7 +67,7 @@ export async function createUser(input: {
 export async function updateUser(
   user_id: string,
   patch: {
-    access_level?: AccessLevel
+    access_level_id?: string
     module?: ModuleRole | null
     active?: boolean
     password?: string

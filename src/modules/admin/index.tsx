@@ -1,6 +1,7 @@
 import { useSearchParams } from 'react-router-dom'
 
 import { AdminHome } from '@/modules/admin/AdminHome'
+import { AccessLevelsView } from '@/modules/admin/access-levels/AccessLevelsView'
 import { BranchesView } from '@/modules/admin/branches/BranchesView'
 import { DocksView } from '@/modules/admin/docks/DocksView'
 import { EmployeesView } from '@/modules/admin/employees/EmployeesView'
@@ -36,6 +37,7 @@ export default function AdminModule() {
           </button>
           {view === 'ajustes' ? <SettingsView /> : null}
           {view === 'usuarios' ? <UsersRolesView /> : null}
+          {view === 'niveles' ? <AccessLevelsView /> : null}
           {view === 'empleados' ? <EmployeesView /> : null}
           {view === 'puestos' ? <PositionsView /> : null}
           {view === 'muelles' ? <DocksView /> : null}
