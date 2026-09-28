@@ -58,28 +58,39 @@ export function RequireAccess({
 }
 
 /**
- * admin/gerencia entran a todo; jefe_area/operador solo a su propio módulo;
- * un nivel de acceso "custom" (ver ARCHITECTURE.md → "Niveles de acceso
- * (catálogo dinámico)") entra a lo que su matriz de módulos le asigne (ver o
- * editar, cualquiera de los dos cuenta como acceso a la pantalla).
+ * admin/gerencia entran a todo. Los demás niveles (jefe_area/operador/custom)
+ * entran por su regla de siempre (jefe_area/operador: su único `module`; sin
+ * regla propia para custom) MÁS lo que su nivel tenga de EXTRA en
+ * `admin_access_level_modules` — ver o editar, cualquiera de los dos cuenta
+ * como acceso a la pantalla (agregado 2026-09-29: antes ese extra solo
+ * aplicaba a custom; ahora también a jefe_area/operador, para poder darles
+ * acceso a más de un módulo sin volverlos custom — ver ARCHITECTURE.md →
+ * "Niveles de acceso (catálogo dinámico)" → "Niveles de sistema editables").
+ * Es puramente aditivo: nunca le quita a nadie el acceso que ya tenía.
  */
 export function allowModule(moduleId: AccessDestination) {
   return (user: AdminUser) => {
     if (user.access_level === 'admin' || user.access_level === 'gerencia') return true
-    if (user.access_level === 'custom') return !!user.moduleAccess?.[moduleId]
-    return user.module === moduleId
+    if (user.module === moduleId) return true
+    return !!user.moduleAccess?.[moduleId]
   }
 }
 
-/** Dashboard Neuronal: transversales, o un nivel custom con ese destino en su matriz. */
+/** Dashboard Neuronal: transversales, o cualquier nivel con ese destino extra en su matriz. */
 export function allowDashboard(user: AdminUser) {
   if (user.access_level === 'admin' || user.access_level === 'gerencia') return true
-  if (user.access_level === 'custom') return !!user.moduleAccess?.dashboard
-  return false
+  return !!user.moduleAccess?.dashboard
 }
 
-/** Configuraciones y Administradores: todo menos operador, o un custom con ese destino en su matriz. */
+/**
+ * Configuraciones y Administradores: transversales y jefe_area entran como
+ * siempre (jefe_area no ve Ajustes/Niveles — eso lo filtra `AdminHome` por
+ * pantalla); operador y custom solo si su nivel tiene 'admin' extra en su
+ * matriz.
+ */
 export function allowAdminSection(user: AdminUser) {
-  if (user.access_level === 'custom') return !!user.moduleAccess?.admin
-  return user.access_level !== 'operador'
+  if (user.access_level === 'admin' || user.access_level === 'gerencia' || user.access_level === 'jefe_area') {
+    return true
+  }
+  return !!user.moduleAccess?.admin
 }

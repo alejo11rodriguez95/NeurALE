@@ -52,12 +52,29 @@ export type ModuleRole =
   | 'outbound'
   | 'inventory'
 
-/** Los 7 destinos que un nivel de acceso "custom" puede cubrir (ver `AnyModuleId` en `shared/modules.ts`). */
+/** Los 7 destinos que un nivel de acceso puede cubrir (ver `AnyModuleId` en `shared/modules.ts`). */
 export type AccessDestination = ModuleRole | 'dashboard' | 'admin'
 
 export type AccessLevel = 'admin' | 'gerencia' | 'jefe_area' | 'operador' | 'custom'
 
 export type ModulePermission = 'ver' | 'editar'
+
+/**
+ * Las 7 pantallas de Configuraciones y Administradores (agregado 2026-09-29 —
+ * ver ARCHITECTURE.md → "Niveles de acceso (catálogo dinámico)" → "Granularidad
+ * por pantalla"). Solo este módulo tiene desglose por pantalla en la matriz de
+ * un nivel de acceso — los otros 6 destinos siguen siendo por módulo completo,
+ * porque sus pantallas las define cada chat de módulo y todavía cambian
+ * seguido (ver comentario en la migración `20260929090000_...`).
+ */
+export type AdminView =
+  | 'ajustes'
+  | 'usuarios'
+  | 'niveles'
+  | 'empleados'
+  | 'puestos'
+  | 'muelles'
+  | 'sucursales'
 
 export type UserRole = ModuleRole | 'gerencia'
 
@@ -76,10 +93,19 @@ export interface AdminUser {
   /** Nivel del catálogo `admin_access_levels` asignado (ver "Niveles de acceso (catálogo dinámico)"). */
   access_level_id: string | null
   /**
-   * Solo se llena cuando `access_level === 'custom'`: mapa destino → permiso,
-   * resuelto por `AuthContext` desde `admin_access_level_modules`. Los demás
-   * niveles (admin/gerencia/jefe_area/operador) siguen resolviéndose con las
-   * reglas de siempre en `RequireAccess` — esto no les aplica.
+   * Mapa destino → permiso, resuelto por `AuthContext` desde
+   * `admin_access_level_modules` (fila con mayor permiso por destino, sin
+   * importar la pantalla). Se llena para CUALQUIER nivel con `access_level_id`
+   * (agregado 2026-09-29): para admin/gerencia/jefe_area es puro acceso EXTRA
+   * sobre lo que ya tenían siempre (`RequireAccess` los sigue dejando pasar
+   * por sus reglas de siempre primero) — nunca les quita nada.
    */
   moduleAccess?: Partial<Record<AccessDestination, ModulePermission>>
+  /**
+   * Desglose por pantalla dentro de Configuraciones y Administradores, solo
+   * cuando el nivel tiene filas específicas de pantalla (no una fila "todas
+   * las pantallas") en su matriz para `module: 'admin'`. Vacío = el nivel no
+   * usa desglose por pantalla (ve todo o nada de `moduleAccess.admin`).
+   */
+  adminViewAccess?: Partial<Record<AdminView, ModulePermission>>
 }

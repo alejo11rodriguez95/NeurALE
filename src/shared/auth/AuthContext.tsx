@@ -1,8 +1,10 @@
 import type { Session } from '@supabase/supabase-js'
 import { createContext, useContext, useEffect, useState, type ReactNode } from 'react'
 
-import type { AdminUser } from '@/lib/supabase'
+import type { AccessDestination, AdminUser, ModulePermission } from '@/lib/supabase'
 import { supabase } from '@/lib/supabase'
+
+const PERMISSION_RANK: Record<ModulePermission, number> = { ver: 1, editar: 2 }
 
 /**
  * Sesión + rol real del usuario actual (ver ARCHITECTURE.md → "Roles y
@@ -33,7 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setAdminUser(null)
       return
     }
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('admin_users')
       .select(
         'id, employee_id, auth_user_id, email, access_level, module, active, must_change_password, created_at, access_level_id',
@@ -42,21 +44,48 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .eq('active', true)
       .maybeSingle()
 
+    if (error) {
+      // No tapar el error: si esto falla (p.ej. una migración pendiente que
+      // agregó una columna que la consulta de arriba todavía no tiene),
+      // `data` queda null y el usuario se ve "sin acceso" para TODOS, no solo
+      // para él — que quede en la consola ayuda a diagnosticarlo rápido en
+      // vez de parecer un problema de su cuenta en particular.
+      console.error('[auth] No se pudo cargar admin_users:', error.message)
+    }
+
     const user = (data as AdminUser | null) ?? null
 
-    // Nivel de acceso "custom" (ver ARCHITECTURE.md → "Niveles de acceso
-    // (catálogo dinámico)"): admin/gerencia/jefe_area/operador siguen
-    // resolviéndose solo con access_level/module (como siempre); solo un
-    // nivel custom necesita esta consulta extra para saber a qué puede
-    // entrar y con qué permiso (ver/editar).
-    if (user && user.access_level === 'custom' && user.access_level_id) {
-      const { data: modules } = await supabase
+    // Matriz de "Niveles de acceso" (ver ARCHITECTURE.md → "Niveles de acceso
+    // (catálogo dinámico)"): se resuelve para CUALQUIER nivel con
+    // access_level_id, no solo custom (desde 2026-09-29) — para
+    // admin/gerencia/jefe_area/operador es acceso EXTRA sobre lo de siempre
+    // (`RequireAccess` los deja pasar por su regla de siempre primero); para
+    // custom es su única fuente de acceso.
+    if (user && user.access_level_id) {
+      const { data: rows } = await supabase
         .from('admin_access_level_modules')
-        .select('module, permission')
+        .select('module, view, permission')
         .eq('access_level_id', user.access_level_id)
-      user.moduleAccess = Object.fromEntries(
-        (modules ?? []).map((m) => [m.module, m.permission]),
-      ) as AdminUser['moduleAccess']
+
+      const moduleAccess: Partial<Record<AccessDestination, ModulePermission>> = {}
+      const adminViewAccess: Partial<Record<string, ModulePermission>> = {}
+
+      for (const row of rows ?? []) {
+        const mod = row.module as AccessDestination
+        const permission = row.permission as ModulePermission
+        const current = moduleAccess[mod]
+        if (!current || PERMISSION_RANK[permission] > PERMISSION_RANK[current]) {
+          moduleAccess[mod] = permission
+        }
+        // 'all' es el valor por defecto (módulo completo) — no es una
+        // pantalla real, así que no entra al desglose por pantalla.
+        if (mod === 'admin' && row.view !== 'all') {
+          adminViewAccess[row.view] = permission
+        }
+      }
+
+      user.moduleAccess = moduleAccess
+      user.adminViewAccess = adminViewAccess as AdminUser['adminViewAccess']
     }
 
     setAdminUser(user)

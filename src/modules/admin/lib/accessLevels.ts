@@ -1,17 +1,23 @@
-import type { AccessDestination, ModulePermission } from '@/lib/supabase'
+import type { AccessDestination, AdminUser, AdminView, ModulePermission } from '@/lib/supabase'
 import { supabase } from '@/lib/supabase'
 import { ALL_MODULES } from '@/shared/modules'
 
 /**
  * Niveles de acceso (catálogo dinámico) — ver ARCHITECTURE.md → "Roles y
- * accesos" → "Niveles de acceso (catálogo dinámico, 2026-09-28)".
+ * accesos" → "Niveles de acceso (catálogo dinámico, 2026-09-28)" y su
+ * ampliación "Niveles de sistema editables + granularidad por pantalla
+ * (2026-09-29)".
  *
  * Admin, Gerencia, Jefe de área y Operador son niveles "de sistema"
- * (`legacy_key` no nulo): siguen funcionando exactamente igual que siempre
- * (ligados a `admin_users.access_level`/`module`), aparecen aquí listados
- * pero de solo lectura — no se pueden editar, desactivar ni eliminar desde
- * esta pantalla. Un nivel nuevo (creado aquí) tiene `legacy_key: null` y su
- * propia matriz de módulos + ver/editar en `admin_access_level_modules`.
+ * (`legacy_key` no nulo): su acceso base sigue viniendo exactamente igual que
+ * siempre de `admin_users.access_level`/`module` — eso nunca se toca desde
+ * aquí. Lo que SÍ se puede editar desde esta pantalla, para Gerencia/Jefe de
+ * área/Operador (nunca para Admin, que queda totalmente bloqueado):
+ *   - el nombre del nivel;
+ *   - una matriz de acceso EXTRA (`admin_access_level_modules`), aditiva —
+ *     agrega entrada a más módulos/pantallas, nunca quita las que ya tenían.
+ * Un nivel nuevo (creado aquí, `legacy_key: null`) usa esa misma matriz como
+ * su única fuente de acceso.
  */
 export type LegacyAccessKey = 'admin' | 'gerencia' | 'jefe_area' | 'operador'
 
@@ -24,6 +30,8 @@ export interface AccessLevel {
 
 export interface AccessLevelModuleRow {
   module: AccessDestination
+  /** 'all' = el módulo completo. Solo 'admin' admite un id de pantalla suelto. */
+  view: string
   permission: ModulePermission
 }
 
@@ -37,13 +45,60 @@ export const ACCESS_DESTINATIONS: { id: AccessDestination; label: string }[] = A
   label: m.label,
 }))
 
+/**
+ * Las 7 pantallas de Configuraciones y Administradores — único destino con
+ * desglose por pantalla (ver comentario de la migración
+ * `20260929090000_admin_access_levels_view_and_editable.sql` sobre por qué
+ * los otros 6 destinos se quedan en "módulo completo" por ahora).
+ */
+export const ADMIN_VIEWS: { id: AdminView; label: string }[] = [
+  { id: 'ajustes', label: 'Ajustes de la plataforma' },
+  { id: 'usuarios', label: 'Usuarios y Roles' },
+  { id: 'niveles', label: 'Niveles de Acceso' },
+  { id: 'empleados', label: 'Empleados' },
+  { id: 'puestos', label: 'Puestos' },
+  { id: 'muelles', label: 'Muelles' },
+  { id: 'sucursales', label: 'Sucursales' },
+]
+
+/**
+ * Pantallas de Configuraciones y Administradores que cada nivel de sistema ve
+ * por defecto, sin depender de la matriz — es exactamente el comportamiento
+ * de siempre (ver `AdminHome.tsx`, antes hardcodeado ahí). `'all'` = las 7.
+ */
+const DEFAULT_ADMIN_VIEWS: Partial<Record<LegacyAccessKey, AdminView[] | 'all'>> = {
+  admin: 'all',
+  gerencia: 'all',
+  jefe_area: ['usuarios', 'empleados', 'puestos', 'muelles', 'sucursales'],
+  operador: [],
+}
+
+/**
+ * ¿Puede este usuario ver esta pantalla de Configuraciones y Administradores?
+ * Primero su acceso de siempre (por nivel de sistema); si no, lo que su nivel
+ * tenga EXTRA en la matriz (desglose por pantalla si lo tiene, si no la fila
+ * "todas las pantallas" si la tiene). Aditivo: nunca le quita a nadie lo que
+ * ya veía por defecto.
+ */
+export function canSeeAdminView(user: AdminUser, view: AdminView): boolean {
+  const legacy = user.access_level in DEFAULT_ADMIN_VIEWS ? (user.access_level as LegacyAccessKey) : null
+  const byDefault = legacy ? DEFAULT_ADMIN_VIEWS[legacy] : undefined
+  if (byDefault === 'all') return true
+  if (Array.isArray(byDefault) && byDefault.includes(view)) return true
+
+  if (user.adminViewAccess && Object.keys(user.adminViewAccess).length > 0) {
+    return !!user.adminViewAccess[view]
+  }
+  return !!user.moduleAccess?.admin
+}
+
 export async function fetchAccessLevels(): Promise<AccessLevelWithModules[]> {
   const [{ data: levels, error: levelsError }, { data: mods, error: modsError }] = await Promise.all([
     supabase
       .from('admin_access_levels')
       .select('id, name, legacy_key, active')
       .order('created_at', { ascending: true }),
-    supabase.from('admin_access_level_modules').select('access_level_id, module, permission'),
+    supabase.from('admin_access_level_modules').select('access_level_id, module, view, permission'),
   ])
 
   if (levelsError) throw levelsError
@@ -53,7 +108,11 @@ export async function fetchAccessLevels(): Promise<AccessLevelWithModules[]> {
     ...level,
     modules: (mods ?? [])
       .filter((m) => m.access_level_id === level.id)
-      .map((m) => ({ module: m.module as AccessDestination, permission: m.permission as ModulePermission })),
+      .map((m) => ({
+        module: m.module as AccessDestination,
+        view: m.view as string,
+        permission: m.permission as ModulePermission,
+      })),
   }))
 }
 
@@ -75,9 +134,9 @@ export async function createAccessLevel(
   if (error) throw error
 
   if (modules.length) {
-    const { error: modError } = await supabase
-      .from('admin_access_level_modules')
-      .insert(modules.map((m) => ({ access_level_id: level.id, module: m.module, permission: m.permission })))
+    const { error: modError } = await supabase.from('admin_access_level_modules').insert(
+      modules.map((m) => ({ access_level_id: level.id, module: m.module, view: m.view, permission: m.permission })),
+    )
     if (modError) {
       // No dejar un nivel a medias (sin su matriz) si esto falla.
       await supabase.from('admin_access_levels').delete().eq('id', level.id)
@@ -89,15 +148,27 @@ export async function createAccessLevel(
 }
 
 /**
- * Edita un nivel (solo aplica a niveles "custom" — la pantalla no ofrece
- * editar los de sistema). `modules`, si se manda, reemplaza la matriz
- * completa (borra las filas viejas e inserta las nuevas).
+ * Edita un nivel. Admin queda siempre bloqueado (ni nombre ni matriz). Para
+ * Gerencia/Jefe de área/Operador solo se permite nombre + matriz EXTRA (el
+ * estado activo/inactivo no se toca desde aquí para no arriesgar que alguien
+ * desactive por error un nivel de sistema — su acceso base no depende de
+ * `active` de todas formas). Para un nivel personalizado (`legacy_key: null`)
+ * se permite todo. `modules`, si se manda, reemplaza la matriz completa
+ * (borra las filas viejas e inserta las nuevas).
  */
 export async function updateAccessLevel(
-  id: string,
+  level: Pick<AccessLevel, 'id' | 'legacy_key'>,
   patch: { name?: string; active?: boolean; modules?: AccessLevelModuleRow[] },
 ): Promise<void> {
-  const { name, active, modules } = patch
+  if (level.legacy_key === 'admin') {
+    throw new Error('El nivel "Admin" no se puede editar.')
+  }
+
+  const { name, modules } = patch
+  // Ver comentario arriba: para los 3 niveles de sistema editables, `active`
+  // se ignora aunque venga en el patch (la pantalla tampoco lo ofrece para
+  // ellos, esto es un respaldo).
+  const active = level.legacy_key ? undefined : patch.active
 
   if (name !== undefined || active !== undefined) {
     const { error } = await supabase
@@ -106,7 +177,7 @@ export async function updateAccessLevel(
         ...(name !== undefined ? { name } : {}),
         ...(active !== undefined ? { active } : {}),
       })
-      .eq('id', id)
+      .eq('id', level.id)
     if (error) throw error
   }
 
@@ -114,13 +185,13 @@ export async function updateAccessLevel(
     const { error: delError } = await supabase
       .from('admin_access_level_modules')
       .delete()
-      .eq('access_level_id', id)
+      .eq('access_level_id', level.id)
     if (delError) throw delError
 
     if (modules.length) {
-      const { error: insError } = await supabase
-        .from('admin_access_level_modules')
-        .insert(modules.map((m) => ({ access_level_id: id, module: m.module, permission: m.permission })))
+      const { error: insError } = await supabase.from('admin_access_level_modules').insert(
+        modules.map((m) => ({ access_level_id: level.id, module: m.module, view: m.view, permission: m.permission })),
+      )
       if (insError) throw insError
     }
   }
