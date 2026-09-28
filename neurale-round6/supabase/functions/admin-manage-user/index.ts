@@ -1,0 +1,416 @@
+// Edge Function: admin-manage-user
+//
+// Único lugar donde se crean/editan cuentas reales de NeurALE (tabla
+// `admin_users` + el usuario real en Supabase Auth). No se puede hacer esto
+// desde el frontend con la anon key: crear un usuario CON la contraseña que
+// elige un tercero (el admin) requiere la Admin API de Supabase Auth, que
+// exige la service_role key — esa key nunca se pone en el frontend (regla
+// obligatoria de ARCHITECTURE.md), así que vive únicamente aquí, como
+// variable de entorno/secreto de esta función en el dashboard de Supabase.
+//
+// Cómo desplegar (sin instalar nada local): Supabase → Functions → Deploy a
+// new function → pega este archivo. Luego, Functions → admin-manage-user →
+// Secrets, agrega SUPABASE_URL, SUPABASE_ANON_KEY y SUPABASE_SERVICE_ROLE_KEY
+// (los mismos valores del proyecto, visibles en Settings → API).
+//
+// Acciones:
+//   - resolve_login (pública, sin sesión): dado lo que la persona escribió
+//     en el login (correo completo, la parte antes de la @, o un código de
+//     empleado), devuelve el correo real que hay que mandarle a
+//     `signInWithPassword` — Supabase Auth solo entiende correo, no
+//     "usuario corto" ni código de empleado.
+//   - ack_password_changed (requiere sesión): marca `must_change_password`
+//     en false para el usuario que llama, después de que cambió su propia
+//     contraseña (eso lo hace el frontend directo con `auth.updateUser`,
+//     sin pasar por aquí — esta acción solo actualiza la bandera).
+//   - create / update (requieren sesión con nivel admin/gerencia/jefe_area):
+//     alta y edición de cuentas. Desde 2026-09-28 (ver ARCHITECTURE.md →
+//     "Niveles de acceso (catálogo dinámico)"), el frontend manda
+//     `access_level_id` (un id de `admin_access_levels`) en vez de un
+//     `access_level` de texto: esta función es la que resuelve, del lado
+//     del servidor, a qué `access_level`/`module` reales de `admin_users`
+//     equivale ese nivel (vía su `legacy_key`) — nunca confía en un
+//     access_level/module que mande el cliente directamente. `create` deja
+//     `must_change_password = true` siempre (la contraseña que pone el
+//     admin es temporal); `update` la vuelve a poner en true cuando el
+//     admin resetea la contraseña de alguien más. `update` también puede
+//     cambiar el correo (patch.email) — se actualiza a la vez en admin_users
+//     y en el usuario real de Auth (auth.admin.updateUserById), nunca solo
+//     en una de las dos tablas.
+//
+// Reglas de negocio (además de la RLS de `admin_users`, que no permite
+// escribir esta tabla desde ningún otro lado):
+//   - admin / gerencia: pueden crear o editar cualquier usuario, con
+//     cualquier nivel de acceso (de sistema o "custom") y módulo.
+//   - jefe_area: solo puede crear/editar usuarios con el nivel de sistema
+//     "Operador" dentro de su propio módulo — nunca un nivel "custom" (eso
+//     lo sigue reservando a admin/gerencia: `callerCanApply` rechaza
+//     cualquier access_level resultante que no sea 'operador').
+//   - operador: no puede crear ni editar usuarios.
+
+import { createClient } from 'jsr:@supabase/supabase-js@2'
+
+const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
+const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+const ANON_KEY = Deno.env.get('SUPABASE_ANON_KEY')!
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+}
+
+type AccessLevel = 'admin' | 'gerencia' | 'jefe_area' | 'operador' | 'custom'
+type ModuleRole = 'inbound' | 'storage' | 'picking' | 'outbound' | 'inventory'
+
+interface ResolveLoginPayload {
+  action: 'resolve_login'
+  identifier: string
+}
+
+interface AckPasswordChangedPayload {
+  action: 'ack_password_changed'
+}
+
+interface CreatePayload {
+  action: 'create'
+  employee_id: string
+  email: string | null
+  password: string
+  /** Id de `admin_access_levels` — esta función resuelve el access_level/module real. */
+  access_level_id: string
+  /** Solo se usa si el nivel resuelve a 'jefe_area'/'operador' (los únicos con módulo por usuario). */
+  module: ModuleRole | null
+}
+
+interface UpdatePayload {
+  action: 'update'
+  user_id: string
+  patch: {
+    /** Cambiar de nivel de acceso (opcional). Igual que en `create`, resuelto server-side. */
+    access_level_id?: string
+    module?: ModuleRole | null
+    active?: boolean
+    password?: string
+    /** Vacío/omitido explícito: se sintetiza `emp-<código>@neurale.local` (igual que en `create`). */
+    email?: string | null
+  }
+}
+
+type Payload = ResolveLoginPayload | AckPasswordChangedPayload | CreatePayload | UpdatePayload
+
+function json(body: unknown, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json', ...corsHeaders },
+  })
+}
+
+function shapeOk(access_level: AccessLevel, module: string | null) {
+  if (access_level === 'admin' || access_level === 'gerencia' || access_level === 'custom') {
+    return module === null
+  }
+  return !!module
+}
+
+/**
+ * El nivel de acceso del caller le permite dejar el registro resultante como
+ * quedaría. Un jefe_area SOLO puede aplicar el nivel de sistema 'operador'
+ * dentro de su propio módulo — nunca 'custom' (un nivel creado desde la
+ * pantalla "Niveles de Acceso" siempre requiere admin/gerencia).
+ */
+function callerCanApply(
+  caller: { access_level: AccessLevel; module: string | null },
+  target: { access_level: AccessLevel; module: string | null },
+) {
+  if (caller.access_level === 'admin' || caller.access_level === 'gerencia') return true
+  if (caller.access_level === 'jefe_area') {
+    return target.access_level === 'operador' && target.module === caller.module
+  }
+  return false
+}
+
+/** Resuelve un `access_level_id` del catálogo al access_level/module reales de `admin_users`. */
+async function resolveAccessLevel(
+  adminClient: ReturnType<typeof createClient>,
+  accessLevelId: string,
+  requestedModule: ModuleRole | null,
+): Promise<
+  | { ok: true; access_level: AccessLevel; module: ModuleRole | null }
+  | { ok: false; error: string; status: number }
+> {
+  const { data: level, error } = await adminClient
+    .from('admin_access_levels')
+    .select('id, legacy_key, active')
+    .eq('id', accessLevelId)
+    .single()
+
+  if (error || !level) return { ok: false, error: 'nivel_de_acceso_no_encontrado', status: 404 }
+  if (!level.active) return { ok: false, error: 'nivel_de_acceso_inactivo', status: 400 }
+
+  const access_level = (level.legacy_key ?? 'custom') as AccessLevel
+  const module = access_level === 'jefe_area' || access_level === 'operador' ? requestedModule : null
+
+  return { ok: true, access_level, module }
+}
+
+/** Sanitiza un código de empleado para usarlo como parte local de un correo interno. */
+function sanitizeForEmail(raw: string) {
+  return raw.trim().toLowerCase().replace(/[^a-z0-9.-]/g, '-')
+}
+
+Deno.serve(async (req) => {
+  // Preflight CORS: el navegador manda esto antes del POST real.
+  if (req.method === 'OPTIONS') {
+    return new Response('ok', { headers: corsHeaders })
+  }
+
+  if (req.method !== 'POST') return json({ error: 'method_not_allowed' }, 405)
+
+  let payload: Payload
+  try {
+    payload = await req.json()
+  } catch {
+    return json({ error: 'body_invalido' }, 400)
+  }
+
+  const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY)
+
+  // ---------------------------------------------------------------------
+  // resolve_login: pública, sin sesión (se usa ANTES de iniciar sesión).
+  // ---------------------------------------------------------------------
+  if (payload.action === 'resolve_login') {
+    const raw = (payload.identifier ?? '').trim()
+    if (!raw) return json({ email: null })
+
+    // Correo completo: se manda tal cual, Supabase Auth valida si existe.
+    if (raw.includes('@')) return json({ email: raw })
+
+    // 1) ¿Es un código de empleado?
+    const { data: byCode } = await adminClient
+      .from('admin_users')
+      .select('email, admin_employees!inner(employee_code)')
+      .eq('admin_employees.employee_code', raw)
+      .limit(2)
+
+    if (byCode && byCode.length === 1) {
+      return json({ email: byCode[0].email })
+    }
+
+    // 2) ¿Es la parte del correo antes de la @? (ej. "josue.rodriguez")
+    const { data: byLocal } = await adminClient
+      .from('admin_users')
+      .select('email')
+      .eq('email_local', raw.toLowerCase())
+      .limit(2)
+
+    if (byLocal && byLocal.length === 1) {
+      return json({ email: byLocal[0].email })
+    }
+
+    // Sin match único (no existe, o hay ambigüedad) — no se distingue el
+    // motivo en la respuesta para no dar pistas.
+    return json({ email: null })
+  }
+
+  // El resto de acciones sí requieren sesión iniciada.
+  const authHeader = req.headers.get('Authorization') ?? ''
+  const callerClient = createClient(SUPABASE_URL, ANON_KEY, {
+    global: { headers: { Authorization: authHeader } },
+  })
+
+  const { data: authData, error: authError } = await callerClient.auth.getUser()
+  if (authError || !authData.user) return json({ error: 'no_autenticado' }, 401)
+
+  // ---------------------------------------------------------------------
+  // ack_password_changed: cualquier usuario logueado puede marcar su propia
+  // fila. El cambio de contraseña en sí lo hace el frontend directo con
+  // auth.updateUser (no necesita service_role) — esto solo baja la bandera.
+  // ---------------------------------------------------------------------
+  if (payload.action === 'ack_password_changed') {
+    const { error } = await adminClient
+      .from('admin_users')
+      .update({ must_change_password: false })
+      .eq('auth_user_id', authData.user.id)
+
+    if (error) return json({ error: error.message }, 400)
+    return json({ ok: true })
+  }
+
+  const { data: callerRow, error: callerError } = await callerClient
+    .from('admin_users')
+    .select('access_level, module, active')
+    .eq('auth_user_id', authData.user.id)
+    .single()
+
+  if (callerError || !callerRow || !callerRow.active) {
+    return json({ error: 'sin_permiso' }, 403)
+  }
+  if (!['admin', 'gerencia', 'jefe_area'].includes(callerRow.access_level)) {
+    return json({ error: 'sin_permiso' }, 403)
+  }
+
+  const caller = { access_level: callerRow.access_level as AccessLevel, module: callerRow.module as string | null }
+
+  if (payload.action === 'create') {
+    const { employee_id, password, access_level_id, module: requestedModule } = payload
+    let email = payload.email?.trim() || ''
+
+    if (!employee_id || !password || !access_level_id) {
+      return json({ error: 'faltan_campos' }, 400)
+    }
+
+    const resolved = await resolveAccessLevel(adminClient, access_level_id, requestedModule)
+    if (!resolved.ok) return json({ error: resolved.error }, resolved.status)
+    const { access_level, module } = resolved
+
+    if (!shapeOk(access_level, module)) {
+      return json({ error: 'modulo_invalido_para_ese_nivel' }, 400)
+    }
+    if (!callerCanApply(caller, { access_level, module })) {
+      return json({ error: 'sin_permiso_para_ese_nivel_o_modulo' }, 403)
+    }
+
+    // Sin correo real: el empleado inicia sesión con su código de empleado;
+    // por dentro igual necesita un correo (lo exige Supabase Auth), así que
+    // se genera uno interno que nadie tiene que recordar ni usar.
+    if (!email) {
+      const { data: employee, error: employeeError } = await adminClient
+        .from('admin_employees')
+        .select('employee_code')
+        .eq('id', employee_id)
+        .single()
+
+      if (employeeError || !employee) return json({ error: 'empleado_no_encontrado' }, 404)
+      email = `emp-${sanitizeForEmail(employee.employee_code)}@neurale.local`
+    }
+
+    const { data: created, error: createError } = await adminClient.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+    })
+    if (createError || !created.user) {
+      return json({ error: createError?.message ?? 'no_se_pudo_crear_el_usuario' }, 400)
+    }
+
+    const { data: row, error: insertError } = await adminClient
+      .from('admin_users')
+      .insert({
+        employee_id,
+        auth_user_id: created.user.id,
+        email,
+        access_level,
+        module,
+        access_level_id,
+        created_by: authData.user.id,
+        must_change_password: true,
+      })
+      .select('id, employee_id, email, access_level, module, access_level_id, active, must_change_password, created_at')
+      .single()
+
+    if (insertError) {
+      // No dejar un auth.users huérfano si falla el insert de admin_users.
+      await adminClient.auth.admin.deleteUser(created.user.id)
+      return json({ error: insertError.message }, 400)
+    }
+
+    return json({ data: row })
+  }
+
+  if (payload.action === 'update') {
+    const { user_id, patch } = payload
+    if (!user_id) return json({ error: 'faltan_campos' }, 400)
+
+    const { data: target, error: targetError } = await adminClient
+      .from('admin_users')
+      .select('id, employee_id, auth_user_id, access_level, module, access_level_id')
+      .eq('id', user_id)
+      .single()
+
+    if (targetError || !target) return json({ error: 'usuario_no_encontrado' }, 404)
+
+    // Cambiar de nivel de acceso (patch.access_level_id): se resuelve server-side,
+    // igual que en `create`. Sin eso, un `patch.module` suelto solo mueve de
+    // módulo a un jefe_area/operador que ya tenía ese nivel (sin cambiarlo).
+    let nextAccessLevel = target.access_level as AccessLevel
+    let nextModule = target.module as ModuleRole | null
+    let nextAccessLevelId = target.access_level_id as string | null
+    const levelOrModuleChanged = patch.access_level_id !== undefined || patch.module !== undefined
+
+    if (patch.access_level_id !== undefined) {
+      const resolved = await resolveAccessLevel(adminClient, patch.access_level_id, patch.module ?? null)
+      if (!resolved.ok) return json({ error: resolved.error }, resolved.status)
+      nextAccessLevel = resolved.access_level
+      nextModule = resolved.module
+      nextAccessLevelId = patch.access_level_id
+    } else if (patch.module !== undefined) {
+      nextModule = patch.module
+    }
+
+    if (!shapeOk(nextAccessLevel, nextModule)) {
+      return json({ error: 'modulo_invalido_para_ese_nivel' }, 400)
+    }
+    // El jefe_area debe poder aplicar tanto el estado actual como el nuevo.
+    if (
+      !callerCanApply(caller, { access_level: target.access_level, module: target.module }) ||
+      !callerCanApply(caller, { access_level: nextAccessLevel, module: nextModule })
+    ) {
+      return json({ error: 'sin_permiso_para_ese_nivel_o_modulo' }, 403)
+    }
+
+    if (patch.password) {
+      const { error: pwError } = await adminClient.auth.admin.updateUserById(target.auth_user_id, {
+        password: patch.password,
+      })
+      if (pwError) return json({ error: pwError.message }, 400)
+    }
+
+    // Editar correo: hay que actualizarlo TANTO en admin_users como en el
+    // usuario real de Supabase Auth (son dos columnas independientes) — si
+    // solo se actualizara admin_users, el login (que valida contra Auth)
+    // seguiría pidiendo el correo viejo. Vacío/omitido explícito = sin correo
+    // real, se sintetiza el mismo `emp-<código>@neurale.local` que usa `create`.
+    let nextEmail: string | undefined
+    if (patch.email !== undefined) {
+      nextEmail = patch.email?.trim() || ''
+      if (!nextEmail) {
+        const { data: employee, error: employeeError } = await adminClient
+          .from('admin_employees')
+          .select('employee_code')
+          .eq('id', target.employee_id)
+          .single()
+        if (employeeError || !employee) return json({ error: 'empleado_no_encontrado' }, 404)
+        nextEmail = `emp-${sanitizeForEmail(employee.employee_code)}@neurale.local`
+      }
+      const { error: emailError } = await adminClient.auth.admin.updateUserById(target.auth_user_id, {
+        email: nextEmail,
+        email_confirm: true,
+      })
+      if (emailError) return json({ error: emailError.message }, 400)
+    }
+
+    const { password: _password, email: _email, access_level_id: _ali, module: _mod, ...rest } = patch
+    const updatePatch = {
+      ...rest,
+      ...(levelOrModuleChanged
+        ? { access_level: nextAccessLevel, module: nextModule, access_level_id: nextAccessLevelId }
+        : {}),
+      ...(nextEmail !== undefined ? { email: nextEmail } : {}),
+      ...(patch.password ? { must_change_password: true } : {}),
+    }
+
+    const { data: row, error: updateError } = await adminClient
+      .from('admin_users')
+      .update(updatePatch)
+      .eq('id', user_id)
+      .select('id, employee_id, email, access_level, module, access_level_id, active, must_change_password, created_at')
+      .single()
+
+    if (updateError) return json({ error: updateError.message }, 400)
+
+    return json({ data: row })
+  }
+
+  return json({ error: 'accion_invalida' }, 400)
+})
