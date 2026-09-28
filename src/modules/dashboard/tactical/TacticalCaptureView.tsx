@@ -80,6 +80,8 @@ export function TacticalCaptureView({ moduleId }: { moduleId: ModuleId }) {
               row={data.processes[proc.id]}
               goal={goalFor(settings.goals, proc.id)}
               palletsPerContainer={settings.goals.g.palletsPerContainer}
+              isq={data.isq}
+              isqMax={settings.goals.g.isqMax}
               color={color}
               onSave={async (v) => {
                 await saveProcess({ shift_date: date, shift, process_id: proc.id }, v)
@@ -226,6 +228,8 @@ function ProcessForm({
   row,
   goal,
   palletsPerContainer,
+  isq = null,
+  isqMax = 0,
   color,
   onSave,
 }: {
@@ -233,6 +237,9 @@ function ProcessForm({
   row: ProcessRow | undefined
   goal: ReturnType<typeof goalFor>
   palletsPerContainer: number
+  /** Inbound: incidencias ISQ del turno (solo lectura, las reporta Storage). */
+  isq?: number | null
+  isqMax?: number
   color: string
   onSave: (v: Partial<ProcessRow>) => Promise<void>
 }) {
@@ -321,9 +328,15 @@ function ProcessForm({
           {def.quality === 'pic_rejections' ? 'Outbound' : 'Inventory'} desde su opción Diálogo Táctico.
         </p>
       ) : null}
+      {def.isq ? (
+        <p className="mt-3 text-xs text-white/40">
+          "ISQ" no se captura aquí: es el conteo automático de las incidencias Inbound-Storage Quality que Storage
+          reporta en este turno (seguimiento en Inbound → ISQ).
+        </p>
+      ) : null}
 
       <p className="mt-5 mb-2 text-[11px] tracking-[0.18em] text-white/40 uppercase">Así se verá en el tablero</p>
-      <div className={`grid grid-cols-2 gap-2 ${containers ? 'sm:grid-cols-6' : ownErrors ? 'sm:grid-cols-5' : 'sm:grid-cols-4'}`}>
+      <div className={`grid grid-cols-2 gap-2 ${containers ? (def.isq ? 'sm:grid-cols-7' : 'sm:grid-cols-6') : ownErrors ? 'sm:grid-cols-5' : 'sm:grid-cols-4'}`}>
         <Cell
           status={stRatio(n('vol_real'), n('vol_plan'))}
           label={containers ? 'Contenedores' : 'Real / plan'}
@@ -348,6 +361,9 @@ function ProcessForm({
         <Cell status={stRatio(n('equip_available'), n('equip_plan'))} label={`${eq} / plan`} value={<Ratio a={fmt(n('equip_available'))} b={fmt(n('equip_plan'))} />} />
         {ownErrors ? (
           <Cell status={stLimit(n('errors'), goal.metaErr)} label={def.err} value={fmt(n('errors'))} meta={`Máximo ${goal.metaErr}`} />
+        ) : null}
+        {def.isq ? (
+          <Cell status={stLimit(isq, isqMax)} label="ISQ (de Storage)" value={fmt(isq)} meta={`Máximo ${isqMax} · automático`} />
         ) : null}
       </div>
     </Section>

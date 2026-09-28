@@ -704,12 +704,31 @@ function Matrix({ board, dense }: { board: Board; dense?: boolean }) {
                         : 'Flota completa'
                 }
               />
-              <Cell
-                status={r.s.err}
-                label={r.def.err}
-                value={fmt(r.errors)}
-                meta={`Máximo ${r.goal.metaErr}${r.errSource ? ` · lo llena ${r.errSource}` : ''}`}
-              />
+              {r.def.isq ? (
+                <div className="grid min-w-0 grid-cols-2 gap-1.5">
+                  <Cell
+                    compact
+                    status={r.s.err}
+                    label="Dif. OC"
+                    value={fmt(r.errors)}
+                    meta={`Máx. ${r.goal.metaErr}`}
+                  />
+                  <Cell
+                    compact
+                    status={r.s.isq}
+                    label="ISQ"
+                    value={fmt(r.isq)}
+                    meta={r.isq === null ? "Sin lectura" : `Máx. ${r.isqMax}`}
+                  />
+                </div>
+              ) : (
+                <Cell
+                  status={r.s.err}
+                  label={r.def.err}
+                  value={fmt(r.errors)}
+                  meta={`Máximo ${r.goal.metaErr}${r.errSource ? ` · lo llena ${r.errSource}` : ''}`}
+                />
+              )}
             </Row>
           )
         })}

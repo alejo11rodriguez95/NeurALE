@@ -250,6 +250,7 @@ export function GoalsDialog({
           {(
             [
               ['palletsPerContainer', 'Pallets promedio por contenedor (Inbound)'],
+              ['isqMax', 'Máx. incidencias ISQ por turno (Inbound)'],
               ['frSuc', 'Meta fill rate sucursales %'],
               ['s5', 'Meta 5S %'],
               ['preop', 'Meta pre-operacional %'],
@@ -326,6 +327,7 @@ export function HistoryDialog({
         `${p.nombre} ${p.transport ? 'camiones disp.' : 'montacargas op.'}`, `${p.nombre} ${p.err}`,
       ),
     )
+    head.push('Inbound ISQ (incidencias de Storage)')
     head.push('Compromiso 1', 'Compromiso 2', 'Compromiso 3', 'Observaciones housekeeping')
     const q = (v: unknown) => {
       const s = v === null || v === undefined ? '' : String(v)
@@ -347,6 +349,7 @@ export function HistoryDialog({
           d?.staff_plan, d?.staff_present, d?.equip_plan, d?.equip_available, r.errors,
         )
       })
+      row.push(x.isq)
       ;(x.shift?.commitments ?? []).forEach((c) => row.push([c.problem, c.owner, c.due].filter(Boolean).join(' | ')))
       if (!x.shift) row.push('', '', '')
       row.push(x.shift?.housekeeping.obs)

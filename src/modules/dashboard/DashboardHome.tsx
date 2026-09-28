@@ -15,6 +15,14 @@ export function DashboardHome({ onNavigate }: { onNavigate: (view: string) => vo
         description="Tablero del turno en una sola pantalla completa: procesos, fill rate, seguridad, orden y compromisos. Cada módulo llena su parte; el gerente llena compromisos y seguridad."
         onClick={() => onNavigate('dialogo')}
       />
+      {/* Agregada desde el chat de Storage (2026-09-27): reutiliza el Dash Storage. */}
+      <OptionCard
+        color={DASHBOARD_MODULE.color}
+        icon="📦"
+        title="ISQ · Inbound-Storage"
+        description="Incidencias que Storage reporta a Inbound (Inbound-Storage Quality): del día o por rango, por tipo, almacenador, turno, estado y causa raíz."
+        onClick={() => onNavigate('isq')}
+      />
     </div>
   )
 }

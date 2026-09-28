@@ -144,6 +144,7 @@ export function computeBoard(data: TacticalData, settings: Settings, date: strin
     const metaProd = inbound ? inbound.metaPerPerson : g.metaProd
     const q = p.quality ? data.quality[p.quality] : undefined
     const errors = p.quality ? (q?.value ?? null) : (d?.errors ?? null)
+    const isq = p.isq ? data.isq : null
     const s = {
       vol: stRatio(d?.vol_real, d?.vol_plan),
       pallets: inbound ? stRatio(inbound.palletsReal, inbound.palletsPlan) : ('na' as Status),
@@ -151,8 +152,10 @@ export function computeBoard(data: TacticalData, settings: Settings, date: strin
       dot: stRatio(d?.staff_present, staffPlan),
       mc: stRatio(d?.equip_available, equipPlan),
       err: stLimit(errors, g.metaErr),
+      isq: p.isq ? stLimit(isq, goals.g.isqMax) : ('na' as Status),
     }
     statuses.push(s.vol, s.prod, s.dot, s.mc, s.err)
+    if (p.isq) statuses.push(s.isq)
     return {
       def: p,
       goal: g,
@@ -163,6 +166,9 @@ export function computeBoard(data: TacticalData, settings: Settings, date: strin
       metaProd,
       inbound,
       errors,
+      /** Inbound: incidencias ISQ del turno (automático, desde Storage). */
+      isq,
+      isqMax: goals.g.isqMax,
       errorsUpdatedAt: p.quality ? q?.updated_at : d?.updated_at,
       /** Módulo que llena el indicador de calidad cuando no es el dueño de la fila. */
       errSource: p.quality

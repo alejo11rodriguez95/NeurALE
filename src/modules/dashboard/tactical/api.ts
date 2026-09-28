@@ -1,5 +1,6 @@
 import type { ModuleId } from '@/shared/modules'
 import { supabase } from '@/lib/supabase'
+import { ISQ_TABLES, countIsqByShift, countIsqInShift } from '@/modules/storage/isq/lib/isq'
 
 import {
   normalizeGoals,
@@ -101,6 +102,12 @@ export interface TacticalData {
   safety: SafetyRow | null
   shift: ShiftRow | null
   quality: Partial<Record<QualityMetric, QualityRow>>
+  /**
+   * Incidencias ISQ (Storage → Inbound) reportadas en el turno. Sale sola de
+   * `storage_isq_incidents` (tabla de Storage). `null` si no se pudo leer
+   * (p. ej. la migración de Storage aún no está corrida) — el tablero sigue.
+   */
+  isq: number | null
 }
 
 export const EMPTY_COMMITMENTS: Commitment[] = [
@@ -144,12 +151,13 @@ export async function fetchSettings(): Promise<Settings> {
 }
 
 export async function fetchShiftData(date: string, shift: ShiftId): Promise<TacticalData> {
-  const [p, f, s, sh, q] = await Promise.all([
+  const [p, f, s, sh, q, isq] = await Promise.all([
     supabase.from(T.process).select('*').eq('shift_date', date).eq('shift', shift),
     supabase.from(T.fillRate).select('*').eq('shift_date', date).eq('shift', shift).maybeSingle(),
     supabase.from(T.safety).select('*').eq('shift_date', date).eq('shift', shift).maybeSingle(),
     supabase.from(T.shift).select('*').eq('shift_date', date).eq('shift', shift).maybeSingle(),
     supabase.from(T.quality).select('*').eq('shift_date', date).eq('shift', shift),
+    countIsqInShift(date, shift).catch(() => null),
   ])
   fail(p.error)
   fail(q.error)
@@ -163,6 +171,7 @@ export async function fetchShiftData(date: string, shift: ShiftId): Promise<Tact
   return {
     processes,
     quality,
+    isq,
     fillRate: (f.data as FillRateRow | null) ?? null,
     safety: (s.data as SafetyRow | null) ?? null,
     shift: normalizeShift(sh.data),
@@ -181,18 +190,28 @@ export async function fetchRange(from: string, to: string) {
         fail(error)
         return (data ?? []) as R[]
       })
-  const [processes, fillRates, safety, shifts, quality] = await Promise.all([
+  const [processes, fillRates, safety, shifts, quality, isq] = await Promise.all([
     q<ProcessRow>(T.process),
     q<FillRateRow>(T.fillRate),
     q<SafetyRow>(T.safety),
     q<Record<string, unknown>>(T.shift),
     q<QualityRow>(T.quality),
+    countIsqByShift(from, to).catch(() => null),
   ])
   const map = new Map<string, TacticalData & { date: string; shiftId: ShiftId }>()
   const get = (date: string, shift: ShiftId) => {
     const k = `${date}|${shift}`
     if (!map.has(k))
-      map.set(k, { date, shiftId: shift, processes: {}, fillRate: null, safety: null, shift: null, quality: {} })
+      map.set(k, {
+        date,
+        shiftId: shift,
+        processes: {},
+        fillRate: null,
+        safety: null,
+        shift: null,
+        quality: {},
+        isq: isq ? (isq.get(k) ?? 0) : null,
+      })
     return map.get(k)!
   }
   processes.forEach((r) => (get(r.shift_date, r.shift).processes[r.process_id] = r))
@@ -202,6 +221,10 @@ export async function fetchRange(from: string, to: string) {
   shifts.forEach((r) => {
     const n = normalizeShift(r)!
     get(n.shift_date, n.shift).shift = n
+  })
+  isq?.forEach((_, k) => {
+    const [d, s] = k.split('|') as [string, ShiftId]
+    get(d, s)
   })
   return [...map.values()].sort((a, b) =>
     (b.date + b.shiftId).localeCompare(a.date + a.shiftId),
@@ -341,10 +364,10 @@ export async function saveSettings(values: Partial<Settings>) {
 
 /* ---------- Tiempo real ---------- */
 
-/** Se suscribe a cambios en las 5 tablas; devuelve la función para desuscribirse. */
+/** Se suscribe a cambios en las tablas del diálogo (+ ISQ de Storage); devuelve la función para desuscribirse. */
 export function subscribeTactical(onChange: () => void): () => void {
   const channel = supabase.channel(`tactical-${Math.random().toString(36).slice(2)}`)
-  Object.values(T).forEach((table) => {
+  ;[...Object.values(T), ISQ_TABLES.incidents].forEach((table) => {
     channel.on('postgres_changes', { event: '*', schema: 'public', table }, onChange)
   })
   channel.subscribe()

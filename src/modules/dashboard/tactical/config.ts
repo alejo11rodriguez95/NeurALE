@@ -28,6 +28,13 @@ export interface ProcessDef {
   transport?: boolean
   /** Inbound: volumen en contenedores + pallets aprox.; productividad por persona. */
   containers?: boolean
+  /**
+   * Inbound: la Calidad se divide en dos cuadros — el indicador propio
+   * (`err`, manual) + "ISQ", conteo automático de las incidencias
+   * Inbound-Storage Quality que Storage reporta en el turno
+   * (`storage_isq_incidents`). Agregado desde el chat de Storage, 2026-09-27.
+   */
+  isq?: boolean
 }
 
 export type QualityMetric = 'pic_rejections' | 'alm_wrong_locations' | 'des_branch_inconsistencies'
@@ -39,7 +46,7 @@ export const QUALITY_METRICS: { id: QualityMetric; label: string; module: Module
 ]
 
 export const PROCESSES: ProcessDef[] = [
-  { id: 'rec', nombre: 'Inbound', err: 'Diferencias vs. OC', module: 'inbound', containers: true },
+  { id: 'rec', nombre: 'Inbound', err: 'Diferencias vs. OC', module: 'inbound', containers: true, isq: true },
   { id: 'alm', nombre: 'Storage', err: 'Ubicaciones erróneas', module: 'storage', quality: 'alm_wrong_locations' },
   { id: 'pic', nombre: 'Picking', err: 'Rechazos de Outbound', module: 'picking', quality: 'pic_rejections' },
   {
@@ -98,7 +105,8 @@ export interface ProcessGoal {
 
 export interface Goals {
   procesos: ProcessGoal[]
-  g: { frSuc: number; s5: number; preop: number; palletsPerContainer: number }
+  /** `isqMax`: máximo de incidencias ISQ por turno (cuadro ISQ de Inbound). */
+  g: { frSuc: number; s5: number; preop: number; palletsPerContainer: number; isqMax: number }
 }
 
 export const DEFAULT_GOALS: Goals = {
@@ -108,7 +116,7 @@ export const DEFAULT_GOALS: Goals = {
     { id: 'pic', unidad: 'líneas', metaProd: 45, metaErr: 2, dot: 18, mc: 3 },
     { id: 'des', unidad: 'pallets', metaProd: 8, metaErr: 0, dot: 10, mc: 3 },
   ],
-  g: { frSuc: 90, s5: 90, preop: 100, palletsPerContainer: 45 },
+  g: { frSuc: 90, s5: 90, preop: 100, palletsPerContainer: 45, isqMax: 0 },
 }
 
 /** Mezcla las metas guardadas con los valores por defecto (tolera jsonb incompleto). */
