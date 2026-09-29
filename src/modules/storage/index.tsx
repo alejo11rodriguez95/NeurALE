@@ -9,6 +9,8 @@ import { IsqReportView } from '@/modules/storage/isq/IsqReportView'
 import { IsqSettingsView } from '@/modules/storage/isq/IsqSettingsView'
 import { ISQ_NAME } from '@/modules/storage/isq/lib/isq'
 import { canConfigureIsq } from '@/modules/storage/isq/ui'
+import { PALLETS_NAME, REFERENCES_NAME } from '@/modules/storage/pallets/lib/pallets'
+import { PalletRecordView, ReferenceControlView } from '@/modules/storage/pallets/PalletViews'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { ModuleScreen } from '@/shared/components/ModuleScreen'
 import { MODULES } from '@/shared/modules'
@@ -21,6 +23,9 @@ const VIEWS = {
   dash: 'dash',
   settings: 'ajustes',
   settingsIsq: 'ajustes-isq',
+  /** Agregadas desde el chat del Dashboard Neuronal (v7 del Diálogo Táctico, 2026-09-29). */
+  pallets: 'registro-pallet',
+  references: 'referencias',
 } as const
 
 /**
@@ -48,6 +53,8 @@ export default function StorageModule() {
   const isqDenied = isViewDenied(adminUser, 'storage', VIEWS.isq)
   const dashDenied = isViewDenied(adminUser, 'storage', VIEWS.dash)
   const settingsDenied = isViewDenied(adminUser, 'storage', VIEWS.settings)
+  const palletsDenied = isViewDenied(adminUser, 'storage', VIEWS.pallets)
+  const referencesDenied = isViewDenied(adminUser, 'storage', VIEWS.references)
 
   function goTo(next: string | null) {
     if (next) setParams({ view: next })
@@ -66,6 +73,8 @@ export default function StorageModule() {
           {view === TACTICAL_VIEW ? <TacticalCaptureView moduleId="storage" /> : null}
           {view === VIEWS.isq ? (isqDenied ? <NoAccess /> : <IsqReportView />) : null}
           {view === VIEWS.dash ? (dashDenied ? <NoAccess /> : <IsqDashboard color={moduleDef.color} />) : null}
+          {view === VIEWS.pallets ? (palletsDenied ? <NoAccess /> : <PalletRecordView />) : null}
+          {view === VIEWS.references ? (referencesDenied ? <NoAccess /> : <ReferenceControlView side="storage" />) : null}
           {view === VIEWS.settings ? (
             canConfigure && !settingsDenied ? <StorageSettingsHome onNavigate={goTo} /> : <NoAccess />
           ) : null}
@@ -82,6 +91,24 @@ export default function StorageModule() {
               title={ISQ_NAME}
               description="Reporta a Inbound las incidencias encontradas al almacenar: pallet dañado, mal estibado, SKU o etiqueta incorrecta, etc."
               onClick={() => goTo(VIEWS.isq)}
+            />
+          ) : null}
+          {!palletsDenied ? (
+            <OptionCard
+              color={moduleDef.color}
+              icon="🧱"
+              title={PALLETS_NAME}
+              description="Registra los pallets almacenados (almacenador, referencia, pallets y SKU). Alimenta los pallets reales de Storage en el Diálogo Táctico."
+              onClick={() => goTo(VIEWS.pallets)}
+            />
+          ) : null}
+          {!referencesDenied ? (
+            <OptionCard
+              color={moduleDef.color}
+              icon="🗂️"
+              title={REFERENCES_NAME}
+              description="Total de pallets almacenados por referencia. Marca ALMACENADO la referencia terminada para que Inbound la actualice."
+              onClick={() => goTo(VIEWS.references)}
             />
           ) : null}
           {!dashDenied ? (

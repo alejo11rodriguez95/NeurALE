@@ -2,8 +2,8 @@ import { useEffect, useState, type CSSProperties, type FormEvent, type ReactNode
 
 import { withAlpha } from '@/shared/modules'
 
-import { SHIFTS, isoWeek, type ShiftId } from './config'
-import { STATUS_COLOR, isNum, tint, type Status } from './metrics'
+import { SHIFTS, isoWeek, type ShiftDef, type ShiftId } from './config'
+import { STATUS_COLOR, isNum, tint, warnRatio, type Status } from './metrics'
 
 /**
  * Piezas visuales del Diálogo Táctico. Locales al Dashboard a propósito (ver
@@ -263,8 +263,11 @@ export function ShiftPicker({
   onShift,
   color,
   compact,
+  shifts = SHIFTS,
 }: {
   compact?: boolean
+  /** Turnos habilitados (Ajustes → Turnos). */
+  shifts?: ShiftDef[]
   date: string
   shift: ShiftId
   onDate: (d: string) => void
@@ -287,7 +290,7 @@ export function ShiftPicker({
     <div className="flex flex-col gap-1">
       <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Turno</span>
       <div className="flex overflow-hidden rounded-lg border border-neurale-border">
-        {SHIFTS.map((s) => (
+        {shifts.map((s) => (
           <button
             key={s.id}
             type="button"
@@ -331,6 +334,61 @@ export function ShiftPicker({
       {fecha}
       {turno}
       {semana}
+    </div>
+  )
+}
+
+/* ---------- Velocímetro (Fill Rate, v7) ---------- */
+
+/**
+ * Medio círculo de 50 % a 100 % con bandas rojo / amarillo / verde según la
+ * meta y el umbral del semáforo (Ajustes → Metas) y una aguja en el valor.
+ */
+export function Gauge({ value, goal, label = 'Fill rate' }: { value: number | null; goal: number; label?: string }) {
+  const MIN = 50
+  const MAX = 100
+  const clamp = (v: number) => Math.min(MAX, Math.max(MIN, v))
+  const ang = (v: number) => Math.PI * (1 - (clamp(v) - MIN) / (MAX - MIN)) // π (izq.) → 0 (der.)
+  const cx = 60
+  const cy = 58
+  const r = 46
+  const pt = (a: number, rr = r) => [cx + rr * Math.cos(a), cy - rr * Math.sin(a)] as const
+  const arc = (from: number, to: number) => {
+    const [x1, y1] = pt(ang(from))
+    const [x2, y2] = pt(ang(to))
+    return `M ${x1} ${y1} A ${r} ${r} 0 0 1 ${x2} ${y2}`
+  }
+  const warnFrom = goal * warnRatio()
+  const bands: [number, number, string][] = [
+    [MIN, warnFrom, STATUS_COLOR.bad],
+    [warnFrom, goal, STATUS_COLOR.warn],
+    [goal, MAX, STATUS_COLOR.ok],
+  ]
+  const status: Status = value === null ? 'na' : value >= goal ? 'ok' : value >= warnFrom ? 'warn' : 'bad'
+  const needle = value === null ? null : pt(ang(value), r - 10)
+  return (
+    <div
+      className="flex min-w-0 flex-col items-center justify-center rounded-xl border px-2 py-1.5"
+      style={{
+        background: status === 'na' ? 'color-mix(in oklab, var(--color-white) 3.5%, transparent)' : tint(STATUS_COLOR[status], 8),
+        borderColor: status === 'na' ? 'color-mix(in oklab, var(--color-white) 7%, transparent)' : tint(STATUS_COLOR[status], 28),
+      }}
+    >
+      <svg viewBox="0 0 120 70" className="h-auto max-h-full w-full max-w-[11rem]" role="img" aria-label={`${label}: ${value === null ? 'sin dato' : `${value.toFixed(1)}%`}`}>
+        <path d={arc(MIN, MAX)} fill="none" stroke="color-mix(in oklab, var(--color-white) 10%, transparent)" strokeWidth="10" />
+        {bands.map(([a, b, c]) =>
+          b > a ? <path key={`${a}-${b}`} d={arc(a, Math.min(b, MAX))} fill="none" stroke={c} strokeWidth="10" strokeOpacity="0.85" /> : null,
+        )}
+        {needle ? (
+          <>
+            <line x1={cx} y1={cy} x2={needle[0]} y2={needle[1]} stroke="var(--color-white)" strokeWidth="3" strokeLinecap="round" />
+            <circle cx={cx} cy={cy} r="4.5" fill="var(--color-white)" />
+          </>
+        ) : null}
+        <text x="10" y="68" fontSize="8" fill="color-mix(in oklab, var(--color-white) 45%, transparent)">{MIN}%</text>
+        <text x="110" y="68" fontSize="8" textAnchor="end" fill="color-mix(in oklab, var(--color-white) 45%, transparent)">{MAX}%</text>
+      </svg>
+      <span className="text-[10px] leading-tight text-white/50">Meta {goal}%</span>
     </div>
   )
 }

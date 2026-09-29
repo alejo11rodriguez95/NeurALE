@@ -5,6 +5,8 @@ import { TacticalCaptureView } from '@/modules/dashboard/tactical/TacticalCaptur
 import { TACTICAL_VIEW, TacticalModuleOption } from '@/modules/dashboard/tactical/TacticalModuleOption'
 import { isViewDenied } from '@/modules/admin/lib/accessLevels'
 import { IsqFollowUpView } from '@/modules/storage/isq/IsqFollowUpView'
+import { REFERENCES_NAME } from '@/modules/storage/pallets/lib/pallets'
+import { ReferenceControlView } from '@/modules/storage/pallets/PalletViews'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { ModuleScreen } from '@/shared/components/ModuleScreen'
 import { MODULES } from '@/shared/modules'
@@ -54,6 +56,7 @@ export default function InboundModule() {
             <>
               {view === TACTICAL_VIEW ? <TacticalCaptureView moduleId="inbound" /> : null}
               {view === 'isq' ? <IsqFollowUpView /> : null}
+              {view === 'referencias' ? <ReferenceControlView side="inbound" /> : null}
             </>
           )}
         </div>
@@ -66,6 +69,15 @@ export default function InboundModule() {
               title="ISQ · Inbound-Storage Quality"
               description="Incidencias que Storage reporta al almacenar lo recibido. Asigna responsable, registra causa y acción correctiva, y ciérralas."
               onClick={() => goTo('isq')}
+            />
+          ) : null}
+          {!isViewDenied(adminUser, 'inbound', 'referencias') ? (
+            <OptionCard
+              color={moduleDef.color}
+              icon="🗂️"
+              title={REFERENCES_NAME}
+              description="Referencias que Storage ya terminó de almacenar (ALMACENADO). Márcalas ACTUALIZADO cuando las actualices en sistema. Agregada desde el Diálogo Táctico (v7)."
+              onClick={() => goTo('referencias')}
             />
           ) : null}
           <TacticalModuleOption moduleId="inbound" onNavigate={goTo} />

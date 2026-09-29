@@ -3,14 +3,19 @@ import { supabase } from '@/lib/supabase'
 import { ISQ_TABLES, countIsqByShift, countIsqInShift } from '@/modules/storage/isq/lib/isq'
 
 import {
+  addDays,
   normalizeGoals,
   PROCESS_LEAD_POSITIONS,
+  slotKeyFor,
+  slotKeyOf,
+  slotMode,
   type Goals,
   type HkValue,
   type ProcessId,
   type QualityMetric,
   type ShiftId,
 } from './config'
+import { chainStorage, fillRateDateFor, type StaffBreakdown, type StorageSlot } from './metrics'
 
 /**
  * Acceso a datos del Diálogo Táctico (tablas `dashboard_tactical_*`, ver
@@ -29,6 +34,13 @@ export const T = {
   shift: 'dashboard_tactical_shift',
   settings: 'dashboard_tactical_settings',
   quality: 'dashboard_tactical_quality',
+  fillRateDaily: 'dashboard_tactical_fill_rate_daily',
+} as const
+
+/** Tablas de Storage que alimentan el Diálogo Táctico (v7 — ver storage/pallets). */
+export const STORAGE_T = {
+  records: 'storage_pallet_records',
+  references: 'storage_references',
 } as const
 
 export interface ProcessRow {
@@ -43,6 +55,17 @@ export interface ProcessRow {
   equip_plan: number | null
   equip_available: number | null
   errors: number | null
+  /** Inbound (v7): dotación por puesto (Revisadores / Aux. de Descarga). */
+  staff_breakdown?: StaffBreakdown | null
+  updated_at?: string
+}
+
+/** Fill rate por día (v7). El tablero de una fecha muestra el del día anterior. */
+export interface FillRateDailyRow {
+  fr_date: string
+  lines_requested: number | null
+  lines_dispatched: number | null
+  shortage_cause: string | null
   updated_at?: string
 }
 
@@ -108,6 +131,10 @@ export interface TacticalData {
    * (p. ej. la migración de Storage aún no está corrida) — el tablero sigue.
    */
   isq: number | null
+  /** v7: fill rate del día anterior (tabla por día). */
+  fillRateDaily: FillRateDailyRow | null
+  /** v7: plan/real automáticos de Storage. `null` si no se pudo calcular. */
+  storage: StorageSlot | null
 }
 
 export const EMPTY_COMMITMENTS: Commitment[] = [
@@ -150,7 +177,70 @@ export async function fetchSettings(): Promise<Settings> {
   }
 }
 
-export async function fetchShiftData(date: string, shift: ShiftId): Promise<TacticalData> {
+/* ---------- Storage automático (v7) ---------- */
+
+const STORAGE_LOOKBACK_DAYS = 30
+
+/**
+ * Plan/real de Storage por casilla (turno o día, según los turnos
+ * habilitados) entre dos fechas. Encadena desde 30 días antes para arrastrar
+ * el pendiente. Si las tablas de Storage aún no existen, devuelve null.
+ */
+export async function fetchStorageSlots(from: string, to: string, goals: Goals): Promise<Map<string, StorageSlot> | null> {
+  try {
+    const start = addDays(from, -STORAGE_LOOKBACK_DAYS)
+    const [rec, recs] = await Promise.all([
+      supabase
+        .from(T.process)
+        .select('shift_date, shift, vol_plan')
+        .eq('process_id', 'rec')
+        .gte('shift_date', start)
+        .lte('shift_date', to),
+      supabase
+        .from(STORAGE_T.records)
+        .select('recorded_at, pallets')
+        .gte('record_date', start)
+        .lte('record_date', addDays(to, 1)),
+    ])
+    fail(rec.error)
+    fail(recs.error)
+    const cfg = goals.shifts
+    const mode = slotMode(cfg)
+    const k = goals.g.palletsPerContainer
+    const inbound = new Map<string, number>()
+    for (const r of (rec.data ?? []) as { shift_date: string; shift: ShiftId; vol_plan: number | null }[]) {
+      if (r.vol_plan === null) continue
+      const key = mode === 'day' ? r.shift_date : `${r.shift_date}|${r.shift}`
+      inbound.set(key, (inbound.get(key) ?? 0) + Number(r.vol_plan) * k)
+    }
+    const real = new Map<string, number>()
+    for (const r of (recs.data ?? []) as { recorded_at: string; pallets: number }[]) {
+      const key = slotKeyOf(r.recorded_at, cfg)
+      real.set(key, (real.get(key) ?? 0) + Number(r.pallets))
+    }
+    const slots: { key: string; inboundPallets: number; real: number }[] = []
+    for (let d = start; d <= to; d = addDays(d, 1)) {
+      const keys = mode === 'day' ? [d] : [`${d}|A`, `${d}|B`]
+      for (const key of keys) slots.push({ key, inboundPallets: inbound.get(key) ?? 0, real: real.get(key) ?? 0 })
+    }
+    return chainStorage(slots, goals.g.storagePct)
+  } catch {
+    return null
+  }
+}
+
+async function fetchFillRateDaily(from: string, to: string): Promise<Map<string, FillRateDailyRow> | null> {
+  const { data, error } = await supabase.from(T.fillRateDaily).select('*').gte('fr_date', from).lte('fr_date', to)
+  if (error) return null
+  return new Map(((data ?? []) as FillRateDailyRow[]).map((r) => [r.fr_date, r]))
+}
+
+export async function fetchShiftData(date: string, shift: ShiftId, goals: Goals): Promise<TacticalData> {
+  const frDate = fillRateDateFor(date)
+  const [storageSlots, frDaily] = await Promise.all([
+    fetchStorageSlots(date, date, goals),
+    fetchFillRateDaily(frDate, frDate),
+  ])
   const [p, f, s, sh, q, isq] = await Promise.all([
     supabase.from(T.process).select('*').eq('shift_date', date).eq('shift', shift),
     supabase.from(T.fillRate).select('*').eq('shift_date', date).eq('shift', shift).maybeSingle(),
@@ -172,6 +262,8 @@ export async function fetchShiftData(date: string, shift: ShiftId): Promise<Tact
     processes,
     quality,
     isq,
+    fillRateDaily: frDaily?.get(frDate) ?? null,
+    storage: storageSlots?.get(slotKeyFor(date, shift, goals.shifts)) ?? null,
     fillRate: (f.data as FillRateRow | null) ?? null,
     safety: (s.data as SafetyRow | null) ?? null,
     shift: normalizeShift(sh.data),
@@ -179,7 +271,7 @@ export async function fetchShiftData(date: string, shift: ShiftId): Promise<Tact
 }
 
 /** Todos los turnos con algún dato entre dos fechas (para Historial / CSV). */
-export async function fetchRange(from: string, to: string) {
+export async function fetchRange(from: string, to: string, goals: Goals) {
   const q = <R,>(table: string) =>
     supabase
       .from(table)
@@ -198,6 +290,10 @@ export async function fetchRange(from: string, to: string) {
     q<QualityRow>(T.quality),
     countIsqByShift(from, to).catch(() => null),
   ])
+  const [storageSlots, frDaily] = await Promise.all([
+    fetchStorageSlots(from, to, goals),
+    fetchFillRateDaily(addDays(from, -1), addDays(to, -1)),
+  ])
   const map = new Map<string, TacticalData & { date: string; shiftId: ShiftId }>()
   const get = (date: string, shift: ShiftId) => {
     const k = `${date}|${shift}`
@@ -211,6 +307,8 @@ export async function fetchRange(from: string, to: string) {
         shift: null,
         quality: {},
         isq: isq ? (isq.get(k) ?? 0) : null,
+        fillRateDaily: frDaily?.get(fillRateDateFor(date)) ?? null,
+        storage: storageSlots?.get(slotKeyFor(date, shift, goals.shifts)) ?? null,
       })
     return map.get(k)!
   }
@@ -252,6 +350,16 @@ export async function saveFillRate(
   const { error } = await supabase
     .from(T.fillRate)
     .upsert({ ...key, ...values }, { onConflict: 'shift_date,shift' })
+  fail(error)
+}
+
+export async function saveFillRateDaily(
+  frDate: string,
+  values: Partial<Omit<FillRateDailyRow, 'fr_date'>>,
+) {
+  const { error } = await supabase
+    .from(T.fillRateDaily)
+    .upsert({ fr_date: frDate, ...values }, { onConflict: 'fr_date' })
   fail(error)
 }
 
@@ -367,7 +475,7 @@ export async function saveSettings(values: Partial<Settings>) {
 /** Se suscribe a cambios en las tablas del diálogo (+ ISQ de Storage); devuelve la función para desuscribirse. */
 export function subscribeTactical(onChange: () => void): () => void {
   const channel = supabase.channel(`tactical-${Math.random().toString(36).slice(2)}`)
-  ;[...Object.values(T), ISQ_TABLES.incidents].forEach((table) => {
+  ;[...Object.values(T), ...Object.values(STORAGE_T), ISQ_TABLES.incidents].forEach((table) => {
     channel.on('postgres_changes', { event: '*', schema: 'public', table }, onChange)
   })
   channel.subscribe()

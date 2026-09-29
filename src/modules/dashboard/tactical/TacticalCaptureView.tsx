@@ -5,11 +5,13 @@ import { canManageModule } from '@/shared/auth/RequireAccess'
 import { GlassCard } from '@/shared/components/GlassCard'
 import { MODULES, type ModuleId } from '@/shared/modules'
 
-import { saveFillRate, saveProcess, saveQuality, saveSafety, type ProcessRow, type QualityRow } from './api'
+import { saveFillRateDaily, saveProcess, saveQuality, saveSafety, type FillRateDailyRow, type ProcessRow, type QualityRow } from './api'
 import {
   SHORTAGE_CAUSES,
-  SHIFTS,
   currentShiftSV,
+  enabledShifts,
+  shiftHours,
+  slotMode,
   goalFor,
   processForModule,
   qualityMetricsForModule,
@@ -18,7 +20,7 @@ import {
   type QualityMetric,
   type ShiftId,
 } from './config'
-import { computeBoard, fmt, inboundCalc, isNum, pct, stLimit, stRatio } from './metrics'
+import { computeBoard, fillRateDateFor, fmt, inboundCalc, inboundStaff, isNum, pct, stLimit, stRatio, type StorageSlot } from './metrics'
 import { Button, Cell, Ratio, ShiftPicker, fieldClass, ringStyle } from './ui'
 import { useTactical } from './useTactical'
 
@@ -45,8 +47,13 @@ export function TacticalCaptureView({ moduleId }: { moduleId: ModuleId }) {
   const canEdit = canManageModule(adminUser, moduleId)
 
   const [date, setDate] = useState(todaySV)
-  const [shift, setShift] = useState<ShiftId>(currentShiftSV)
+  const [shift, setShift] = useState<ShiftId>(() => currentShiftSV())
   const { data, settings, error, reload } = useTactical(date, shift)
+  const shiftCfg = settings?.goals.shifts
+  // Si el turno elegido quedó deshabilitado en Ajustes → Turnos, salta al habilitado.
+  useEffect(() => {
+    if (shiftCfg && !shiftCfg[shift]?.enabled) setShift(shiftCfg.A.enabled ? 'A' : 'B')
+  }, [shiftCfg, shift])
 
   if (!canEdit) {
     return (
@@ -69,7 +76,14 @@ export function TacticalCaptureView({ moduleId }: { moduleId: ModuleId }) {
             Neuronal.
           </p>
         </div>
-        <ShiftPicker date={date} shift={shift} onDate={setDate} onShift={setShift} color={color} />
+        <ShiftPicker
+          date={date}
+          shift={shift}
+          onDate={setDate}
+          onShift={setShift}
+          color={color}
+          shifts={shiftCfg ? enabledShifts(shiftCfg) : undefined}
+        />
       </GlassCard>
 
       {error ? <p className="text-sm text-rose-300">Error: {error}</p> : null}
@@ -84,6 +98,10 @@ export function TacticalCaptureView({ moduleId }: { moduleId: ModuleId }) {
               row={data.processes[proc.id]}
               goal={goalFor(settings.goals, proc.id)}
               palletsPerContainer={settings.goals.g.palletsPerContainer}
+              pickHours={settings.goals.g.pickHours}
+              storage={data.storage}
+              storagePct={settings.goals.g.storagePct}
+              storageMode={slotMode(settings.goals.shifts)}
               isq={data.isq}
               isqMax={settings.goals.g.isqMax}
               color={color}
@@ -108,12 +126,13 @@ export function TacticalCaptureView({ moduleId }: { moduleId: ModuleId }) {
           ) : null}
           {moduleId === 'picking' ? (
             <FillRateForm
-              key={`f-${date}-${shift}`}
-              initial={data.fillRate}
+              key={`f-${fillRateDateFor(date)}`}
+              frDate={fillRateDateFor(date)}
+              initial={data.fillRateDaily}
               goal={settings.goals.g.frSuc}
               color={color}
               onSave={async (v) => {
-                await saveFillRate({ shift_date: date, shift }, v)
+                await saveFillRateDaily(fillRateDateFor(date), v)
                 reload()
               }}
             />
@@ -123,7 +142,7 @@ export function TacticalCaptureView({ moduleId }: { moduleId: ModuleId }) {
             initial={data.safety}
             lti={computeBoard(data, settings, date).safety.lti}
             color={color}
-            shiftLabel={`Turno ${shift} (${SHIFTS.find((s) => s.id === shift)?.hours})`}
+            shiftLabel={`Turno ${shift} (${shiftHours(settings.goals.shifts, shift)})`}
             onSave={async (v) => {
               await saveSafety({ shift_date: date, shift }, v)
               reload()
@@ -232,6 +251,10 @@ function ProcessForm({
   row,
   goal,
   palletsPerContainer,
+  pickHours,
+  storage,
+  storagePct,
+  storageMode,
   isq = null,
   isqMax = 0,
   color,
@@ -241,6 +264,12 @@ function ProcessForm({
   row: ProcessRow | undefined
   goal: ReturnType<typeof goalFor>
   palletsPerContainer: number
+  /** Picking: horas efectivas del turno (Ajustes → Metas). */
+  pickHours: number
+  /** Storage: plan/real automáticos de la casilla actual. */
+  storage: StorageSlot | null
+  storagePct: number
+  storageMode: 'shift' | 'day'
   /** Inbound: incidencias ISQ del turno (solo lectura, las reporta Storage). */
   isq?: number | null
   isqMax?: number
@@ -248,24 +277,21 @@ function ProcessForm({
   onSave: (v: Partial<ProcessRow>) => Promise<void>
 }) {
   const containers = !!def.containers
+  const autoStorage = !!def.autoStorage
+  const perPersonHour = !!def.perPersonHour
   // El indicador de calidad solo se captura aquí si lo llena el propio módulo.
   const ownErrors = !def.quality
-  const keys = [
-    'vol_plan',
-    'vol_real',
-    ...(containers ? [] : ['hh_direct']),
-    'staff_plan',
-    'staff_present',
-    'equip_plan',
-    'equip_available',
-    ...(ownErrors ? ['errors'] : []),
-  ] as const
+  const staff0 = containers ? inboundStaff(row, goal) : null
   const [v, setV] = useState<Vals>(() => ({
     vol_plan: toStr(row?.vol_plan),
     vol_real: toStr(row?.vol_real),
     hh_direct: toStr(row?.hh_direct),
     staff_plan: toStr(row?.staff_plan ?? goal.dot),
     staff_present: toStr(row?.staff_present),
+    rev_plan: toStr(staff0?.revPlan),
+    rev_present: toStr(staff0?.revPresent),
+    aux_plan: toStr(staff0?.auxPlan),
+    aux_present: toStr(staff0?.auxPresent),
     equip_plan: toStr(row?.equip_plan ?? goal.mc),
     equip_available: toStr(row?.equip_available),
     errors: toStr(row?.errors),
@@ -278,21 +304,54 @@ function ProcessForm({
       return null
     }
   }
-  const { busy, save, status } = useSave(() =>
-    onSave(Object.fromEntries(keys.map((k) => [k, toNum(v[k])])) as Partial<ProcessRow>),
-  )
+  const sum = (a: number | null, b: number | null) => (a === null && b === null ? null : (a ?? 0) + (b ?? 0))
 
+  const { busy, save, status } = useSave(() => {
+    const out: Partial<ProcessRow> = {
+      equip_plan: toNum(v.equip_plan),
+      equip_available: toNum(v.equip_available),
+    }
+    if (!autoStorage) {
+      out.vol_plan = toNum(v.vol_plan)
+      out.vol_real = toNum(v.vol_real)
+    }
+    if (!containers && !perPersonHour) out.hh_direct = toNum(v.hh_direct)
+    if (containers) {
+      const rp = toNum(v.rev_plan)
+      const rr = toNum(v.rev_present)
+      const ap = toNum(v.aux_plan)
+      const ar = toNum(v.aux_present)
+      out.staff_breakdown = { rev: { plan: rp, present: rr }, aux: { plan: ap, present: ar } }
+      out.staff_plan = sum(rp, ap)
+      out.staff_present = sum(rr, ar)
+    } else {
+      out.staff_plan = toNum(v.staff_plan)
+      out.staff_present = toNum(v.staff_present)
+    }
+    if (ownErrors) out.errors = toNum(v.errors)
+    return onSave(out)
+  })
+
+  const staffPlan = containers ? sum(n('rev_plan'), n('aux_plan')) : n('staff_plan')
+  const staffPresent = containers ? sum(n('rev_present'), n('aux_present')) : n('staff_present')
+  const volPlan = autoStorage ? (storage?.plan ?? null) : n('vol_plan')
+  const volReal = autoStorage ? (storage?.real ?? null) : n('vol_real')
   const inbound = containers
-    ? inboundCalc(n('vol_plan'), n('vol_real'), n('staff_present'), n('staff_plan'), palletsPerContainer)
+    ? inboundCalc(n('vol_plan'), n('vol_real'), n('aux_present'), n('aux_plan'), palletsPerContainer)
     : null
   const prod = inbound
     ? inbound.perPerson
-    : isNum(n('vol_real')) && isNum(n('hh_direct')) && n('hh_direct')! > 0
-      ? n('vol_real')! / n('hh_direct')!
-      : null
+    : perPersonHour
+      ? isNum(volReal) && isNum(staffPresent) && staffPresent! > 0 && pickHours > 0
+        ? volReal! / staffPresent! / pickHours
+        : null
+      : isNum(volReal) && isNum(n('hh_direct')) && n('hh_direct')! > 0
+        ? volReal! / n('hh_direct')!
+        : null
   const metaProd = inbound ? inbound.metaPerPerson : goal.metaProd
   const u = goal.unidad
   const eq = def.transport ? 'Camiones' : 'Montacargas'
+  const volPct = pct(volReal, volPlan)
 
   return (
     <Section
@@ -307,25 +366,79 @@ function ProcessForm({
         </>
       }
     >
+      {autoStorage ? (
+        <div className="mb-4 rounded-xl border border-neurale-border bg-white/5 p-4 text-sm text-white/70">
+          <p className="mb-2 text-[11px] tracking-[0.18em] text-white/40 uppercase">
+            Volumen automático · {storageMode === 'shift' ? 'turno a turno' : 'día a día'}
+          </p>
+          {storage ? (
+            <div className="grid gap-x-6 gap-y-1 sm:grid-cols-2">
+              <span>
+                {storagePct}% del plan de Inbound: <b className="text-white">{fmt(storage.inboundPart)}</b> pallets
+              </span>
+              <span>
+                Pendiente {storageMode === 'shift' ? 'del turno anterior' : 'del día anterior'}:{' '}
+                <b className="text-white">{fmt(storage.carry)}</b> pallets
+              </span>
+              <span>
+                Plan: <b className="text-white">{fmt(storage.plan)}</b> pallets
+              </span>
+              <span>
+                Reales (Registro x Pallet): <b className="text-white">{fmt(storage.real)}</b> pallets
+              </span>
+            </div>
+          ) : (
+            <p className="text-white/45">
+              Todavía no se puede calcular: falta correr la migración de Registro x Pallet o no hay datos de Inbound.
+            </p>
+          )}
+          <p className="mt-2 text-xs text-white/40">
+            El plan sale solo del plan de Inbound y los pallets reales, de Storage → Registro x Pallet. No se capturan aquí.
+          </p>
+        </div>
+      ) : null}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {containers ? (
           <>
             <Field label="Contenedores proyectados a recibir" value={v.vol_plan} onChange={set('vol_plan')} color={color} />
             <Field label="Contenedores recibidos" value={v.vol_real} onChange={set('vol_real')} color={color} />
           </>
-        ) : (
+        ) : autoStorage ? null : (
           <>
             <Field label={`Volumen plan (${u})`} value={v.vol_plan} onChange={set('vol_plan')} color={color} />
             <Field label={`Volumen real (${u})`} value={v.vol_real} onChange={set('vol_real')} color={color} />
-            <Field label="Horas-hombre trabajadas" value={v.hh_direct} onChange={set('hh_direct')} color={color} />
           </>
         )}
+        {!containers && !perPersonHour ? (
+          <Field label="Horas-hombre trabajadas" value={v.hh_direct} onChange={set('hh_direct')} color={color} />
+        ) : null}
         {ownErrors ? <Field label={def.err} value={v.errors} onChange={set('errors')} color={color} /> : null}
-        <Field label="Dotación plan" value={v.staff_plan} onChange={set('staff_plan')} color={color} />
-        <Field label="Presentes hoy" value={v.staff_present} onChange={set('staff_present')} color={color} />
+        {containers ? (
+          <>
+            <Field label="Revisadores plan" value={v.rev_plan} onChange={set('rev_plan')} color={color} />
+            <Field label="Revisadores presentes" value={v.rev_present} onChange={set('rev_present')} color={color} />
+            <Field label="Aux. de Descarga plan" value={v.aux_plan} onChange={set('aux_plan')} color={color} />
+            <Field label="Aux. de Descarga presentes" value={v.aux_present} onChange={set('aux_present')} color={color} />
+          </>
+        ) : (
+          <>
+            <Field label="Dotación plan" value={v.staff_plan} onChange={set('staff_plan')} color={color} />
+            <Field label="Presentes hoy" value={v.staff_present} onChange={set('staff_present')} color={color} />
+          </>
+        )}
         <Field label={`${eq} plan`} value={v.equip_plan} onChange={set('equip_plan')} color={color} />
         <Field label={`${eq} ${def.transport ? 'disponibles' : 'operativos'}`} value={v.equip_available} onChange={set('equip_available')} color={color} />
       </div>
+      {containers ? (
+        <p className="mt-3 text-xs text-white/40">
+          En el tablero la dotación es la suma de los dos puestos; la productividad se calcula solo con los Aux. de Descarga.
+        </p>
+      ) : null}
+      {perPersonHour ? (
+        <p className="mt-3 text-xs text-white/40">
+          Productividad = (líneas reales ÷ presentes) ÷ {fmt(pickHours)} horas efectivas (se cambia en Ajustes → Metas).
+        </p>
+      ) : null}
       {!ownErrors ? (
         <p className="mt-3 text-xs text-white/40">
           "{def.err}" no se captura aquí: lo llena{' '}
@@ -342,10 +455,22 @@ function ProcessForm({
       <p className="mt-5 mb-2 text-[11px] tracking-[0.18em] text-white/40 uppercase">Así se verá en el tablero</p>
       <div className={`grid grid-cols-2 gap-2 ${containers ? (def.isq ? 'sm:grid-cols-7' : 'sm:grid-cols-6') : ownErrors ? 'sm:grid-cols-5' : 'sm:grid-cols-4'}`}>
         <Cell
-          status={stRatio(n('vol_real'), n('vol_plan'))}
-          label={containers ? 'Contenedores' : 'Real / plan'}
-          value={<Ratio a={fmt(n('vol_real'))} b={fmt(n('vol_plan'))} />}
-          meta={pct(n('vol_real'), n('vol_plan')) === null ? 'Sin dato' : `${fmt(pct(n('vol_real'), n('vol_plan')))}% del plan`}
+          status={stRatio(volReal, volPlan)}
+          label={containers ? 'Contenedores' : autoStorage ? 'Cumplimiento' : 'Real / plan'}
+          value={
+            autoStorage ? (
+              volPct === null ? '—' : <>{fmt(volPct)}<span className="text-[0.55em] text-white/45">%</span></>
+            ) : (
+              <Ratio a={fmt(volReal)} b={fmt(volPlan)} />
+            )
+          }
+          meta={
+            autoStorage
+              ? `${fmt(volReal)} / ${fmt(volPlan)} pallets`
+              : volPct === null
+                ? 'Sin dato'
+                : `${fmt(volPct)}% del plan`
+          }
         />
         {inbound ? (
           <Cell
@@ -357,11 +482,16 @@ function ProcessForm({
         ) : null}
         <Cell
           status={stRatio(prod, metaProd)}
-          label={containers ? 'Pallets por persona' : `${u} por HH`}
+          label={containers ? 'Pallets por aux. descarga' : perPersonHour ? `${u} por persona/hora` : `${u} por HH`}
           value={fmt(prod)}
           meta={`Meta ${fmt(metaProd)}`}
         />
-        <Cell status={stRatio(n('staff_present'), n('staff_plan'))} label="Presentes / plan" value={<Ratio a={fmt(n('staff_present'))} b={fmt(n('staff_plan'))} />} />
+        <Cell
+          status={stRatio(staffPresent, staffPlan)}
+          label="Presentes / plan"
+          value={<Ratio a={fmt(staffPresent)} b={fmt(staffPlan)} />}
+          meta={containers ? `Rev ${fmt(n('rev_present'))} · Aux ${fmt(n('aux_present'))}` : undefined}
+        />
         <Cell status={stRatio(n('equip_available'), n('equip_plan'))} label={`${eq} / plan`} value={<Ratio a={fmt(n('equip_available'))} b={fmt(n('equip_plan'))} />} />
         {ownErrors ? (
           <Cell status={stLimit(n('errors'), goal.metaErr)} label={def.err} value={fmt(n('errors'))} meta={`Máximo ${goal.metaErr}`} />
@@ -438,12 +568,15 @@ function QualityForm({
 /* ---------- Fill Rate (solo Picking) ---------- */
 
 function FillRateForm({
+  frDate,
   initial,
   goal,
   color,
   onSave,
 }: {
-  initial: { lines_requested: number | null; lines_dispatched: number | null; shortage_cause: string | null; updated_at?: string } | null
+  /** Día al que corresponde el resultado (el día anterior a la fecha elegida). */
+  frDate: string
+  initial: FillRateDailyRow | null
   goal: number
   color: string
   onSave: (v: { lines_requested: number | null; lines_dispatched: number | null; shortage_cause: string | null }) => Promise<void>
@@ -466,8 +599,14 @@ function FillRateForm({
 
   return (
     <Section
-      title="Fill Rate sucursales"
-      subtitle={initial?.updated_at ? `Última actualización: ${hhmm(initial.updated_at)}` : 'Resultado al cliente · lo llena Picking.'}
+      title={`Fill Rate sucursales · día anterior (${frDate.slice(8, 10)}/${frDate.slice(5, 7)})`}
+      subtitle={
+        <>
+          Una vez al día: el resultado completo del {frDate.slice(8, 10)}/{frDate.slice(5, 7)}/{frDate.slice(0, 4)}. Se muestra en los dos
+          turnos del tablero de hoy.
+          {initial?.updated_at ? ` Última actualización: ${hhmm(initial.updated_at)}.` : ''}
+        </>
+      }
       footer={
         <>
           {status}

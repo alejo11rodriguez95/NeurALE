@@ -16,10 +16,10 @@ import {
   type Commitment,
   type ShiftRow,
 } from './api'
-import { PROCESS_LEAD_POSITIONS, SHIFTS, addDays } from './config'
-import { GoalsDialog, HistoryDialog, HousekeepingDialog } from './dialogs'
+import { PROCESS_LEAD_POSITIONS, addDays, enabledShifts, shiftHours, type ShiftsConfig } from './config'
+import { HistoryDialog, HousekeepingDialog, SettingsDialog } from './dialogs'
 import { STATUS_COLOR, computeBoard, fmt, type Board } from './metrics'
-import { Button, Cell, NumberDialog, Ratio, ShiftPicker, fieldClass, ringStyle, type NumField } from './ui'
+import { Button, Cell, Gauge, NumberDialog, Ratio, ShiftPicker, fieldClass, ringStyle, type NumField } from './ui'
 
 const LOGO = '/brand/logo-cdnneo-2026.jpg'
 
@@ -74,9 +74,17 @@ const hhmm = (iso?: string) =>
 export function TacticalBoard({ onExit }: { onExit: () => void }) {
   const { adminUser } = useAuth()
   const isManager = adminUser?.access_level === 'admin' || adminUser?.access_level === 'gerencia'
-  const live = useLiveShift()
+  // Turnos habilitados/horarios (Ajustes → Turnos). La key estable evita
+  // reiniciar el reloj en cada re-consulta de ajustes.
+  const [shiftCfg, setShiftCfg] = useState<ShiftsConfig | undefined>(undefined)
+  const live = useLiveShift(shiftCfg)
   const { date, shift } = live
   const { data, settings, error, loadedAt, reload } = useTactical(date, shift)
+  const cfgKey = settings ? JSON.stringify(settings.goals.shifts) : ''
+  useEffect(() => {
+    if (cfgKey) setShiftCfg(JSON.parse(cfgKey) as ShiftsConfig)
+  }, [cfgKey])
+  const shiftList = shiftCfg ? enabledShifts(shiftCfg) : undefined
   const [modal, setModal] = useState<Modal>(null)
   const [toast, setToast] = useState<string | null>(null)
 
@@ -210,7 +218,7 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
             </h1>
           </div>
           <div className="flex flex-wrap gap-2">
-            {isManager ? <Button onClick={() => setModal({ kind: 'goals' })}>Metas</Button> : null}
+            {isManager ? <Button onClick={() => setModal({ kind: 'goals' })}>Ajustes</Button> : null}
             <Button onClick={() => setModal({ kind: 'history' })}>Historial</Button>
             <Button onClick={toggleFullscreen}>Pantalla completa</Button>
             <Button onClick={onExit} title="Volver al Dashboard Neuronal">
@@ -240,7 +248,7 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
             </button>
           )}
           <span>
-            Turno {shift} ({SHIFTS.find((s) => s.id === shift)?.hours}). Cada módulo llena su fila desde su opción
+            Turno {shift} ({shiftCfg ? shiftHours(shiftCfg, shift) : '—'}). Cada módulo llena su fila desde su opción
             "Diálogo Táctico".
           </span>
           {loadedAt ? <span>Actualizado {loadedAt.toLocaleTimeString('es-SV', { hour: '2-digit', minute: '2-digit' })}</span> : null}
@@ -363,11 +371,11 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
                         alt="CD Nneo"
                         className="aspect-[743/320] h-auto w-full rounded-lg border border-white/10 object-contain shadow-[0_4px_18px_rgba(0,0,0,0.45)]"
                       />
-                      <ShiftPicker compact date={date} shift={shift} onDate={live.setDate} onShift={live.setShift} color={C} />
+                      <ShiftPicker compact date={date} shift={shift} onDate={live.setDate} onShift={live.setShift} color={C} shifts={shiftList} />
                     </div>
                   </>
                 ) : (
-                  <ShiftPicker date={date} shift={shift} onDate={live.setDate} onShift={live.setShift} color={C} />
+                  <ShiftPicker date={date} shift={shift} onDate={live.setDate} onShift={live.setShift} color={C} shifts={shiftList} />
                 )}
                 <div className="flex flex-col gap-1">
                   <span className="text-[10px] tracking-[0.18em] text-white/45 uppercase">Gerente de CD</span>
@@ -565,12 +573,12 @@ export function TacticalBoard({ onExit }: { onExit: () => void }) {
           />
         ) : null}
         {modal?.kind === 'goals' && settings ? (
-          <GoalsDialog
+          <SettingsDialog
             goals={settings.goals}
             onClose={() => setModal(null)}
             onSave={async (g) => {
               await saveSettings({ goals: g })
-              setToast('Metas guardadas')
+              setToast('Ajustes guardados')
               reload()
             }}
           />
@@ -662,30 +670,55 @@ function Matrix({ board, dense }: { board: Board; dense?: boolean }) {
                     meta={`×${fmt(r.palletsPerContainer)} por cont.`}
                   />
                 </div>
+              ) : r.def.autoStorage ? (
+                <Cell
+                  status={r.s.vol}
+                  label="Cumplimiento del plan"
+                  value={r.volPct === null ? '—' : <>{fmt(r.volPct)}<span className="text-[0.55em] text-white/45">%</span></>}
+                  meta={
+                    r.storage
+                      ? `${fmt(r.volReal)} / ${fmt(r.volPlan)} pallets${r.storage.carry ? ` · +${fmt(r.storage.carry)} pendiente` : ''}`
+                      : 'Sin dato'
+                  }
+                />
               ) : (
                 <Cell
                   status={r.s.vol}
                   label="Real / plan"
-                  value={<Ratio a={fmt(d?.vol_real)} b={fmt(d?.vol_plan)} />}
+                  value={<Ratio a={fmt(r.volReal)} b={fmt(r.volPlan)} />}
                   meta={r.volPct === null ? 'Sin dato' : `${fmt(r.volPct)}% del plan`}
                 />
               )}
               <Cell
                 status={r.s.prod}
-                label={r.inbound ? 'Pallets por persona' : `${u} por hora-hombre`}
+                label={
+                  r.inbound
+                    ? 'Pallets por aux. descarga'
+                    : r.def.perPersonHour
+                      ? `${u} por persona/hora`
+                      : `${u} por hora-hombre`
+                }
                 value={fmt(r.prod)}
-                meta={r.inbound ? `Meta ${fmt(r.metaProd)} (pallets plan ÷ dotación)` : `Meta ${fmt(r.metaProd)}`}
+                meta={
+                  r.inbound
+                    ? `Meta ${fmt(r.metaProd)} (pallets plan ÷ aux. plan)`
+                    : r.def.perPersonHour
+                      ? `Meta ${fmt(r.metaProd)} · ${fmt(r.pickHours)} h`
+                      : `Meta ${fmt(r.metaProd)}`
+                }
               />
               <Cell
                 status={r.s.dot}
                 label="Presentes / plan"
-                value={<Ratio a={fmt(d?.staff_present)} b={fmt(r.staffPlan)} />}
+                value={<Ratio a={fmt(r.staffPresent)} b={fmt(r.staffPlan)} />}
                 meta={
-                  d?.staff_present == null
-                    ? 'Sin dato'
-                    : d.staff_present < r.staffPlan
-                      ? `Faltan ${fmt(r.staffPlan - d.staff_present)}`
-                      : 'Completo'
+                  r.staff
+                    ? `Rev ${fmt(r.staff.revPresent)}/${fmt(r.staff.revPlan)} · Aux ${fmt(r.staff.auxPresent)}/${fmt(r.staff.auxPlan)}`
+                    : r.staffPresent == null
+                      ? 'Sin dato'
+                      : r.staffPresent < r.staffPlan
+                        ? `Faltan ${fmt(r.staffPlan - r.staffPresent)}`
+                        : 'Completo'
                 }
               />
               <Cell
@@ -737,13 +770,14 @@ function Matrix({ board, dense }: { board: Board; dense?: boolean }) {
 
         <div className="flex flex-col justify-center gap-0.5 rounded-xl border border-dashed border-white/15 px-3 py-2">
           <b className="font-display text-lg leading-tight font-semibold">Fill Rate</b>
-          <small className="text-xs text-white/45">resultado al cliente</small>
+          <small className="text-xs text-white/45">
+            día anterior · {fr.date.slice(8, 10)}/{fr.date.slice(5, 7)}
+          </small>
           <small className="text-[10px] tracking-wide uppercase" style={{ color: fr.row?.updated_at ? MODULES.find((m) => m.id === 'picking')!.color : 'color-mix(in oklab, var(--color-white) 30%, transparent)' }}>
             {fr.row?.updated_at ? `Picking · ${hhmm(fr.row.updated_at)}` : 'Picking · sin captura'}
           </small>
         </div>
         <Cell
-          className="col-span-2"
           status={fr.status}
           label="Sucursales"
           value={fr.pct === null ? '—' : <>{fmt(fr.pct)}<span className="text-[0.55em] text-white/45">%</span></>}
@@ -755,6 +789,7 @@ function Matrix({ board, dense }: { board: Board; dense?: boolean }) {
           value={fmt(missing)}
           meta={missing === null || !sol ? 'Sin dato' : `${fmt(Math.max(missing, 0) / sol * 100)}% de lo solicitado`}
         />
+        <Gauge value={fr.pct} goal={board.fr.goal} />
         <div className="col-span-2 flex flex-col justify-center gap-1 rounded-xl border border-white/[0.07] bg-white/[0.035] px-3 py-2">
           <span className="text-[11px] text-white/55">Causa principal del faltante</span>
           <span className="font-display text-lg leading-tight font-semibold text-white/85">

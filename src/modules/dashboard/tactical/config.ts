@@ -26,8 +26,12 @@ export interface ProcessDef {
   quality?: QualityMetric
   /** Outbound usa "camiones" en vez de "montacargas". */
   transport?: boolean
-  /** Inbound: volumen en contenedores + pallets aprox.; productividad por persona. */
+  /** Inbound: volumen en contenedores + pallets aprox.; dotación Revisadores + Aux. de Descarga. */
   containers?: boolean
+  /** Storage (v7): plan y pallets reales automáticos (Inbound + Registro x Pallet). */
+  autoStorage?: boolean
+  /** Picking (v7): productividad = (líneas reales ÷ presentes) ÷ horas efectivas. */
+  perPersonHour?: boolean
   /**
    * Inbound: la Calidad se divide en dos cuadros — el indicador propio
    * (`err`, manual) + "ISQ", conteo automático de las incidencias
@@ -47,8 +51,8 @@ export const QUALITY_METRICS: { id: QualityMetric; label: string; module: Module
 
 export const PROCESSES: ProcessDef[] = [
   { id: 'rec', nombre: 'Inbound', err: 'Diferencias vs. OC', module: 'inbound', containers: true, isq: true },
-  { id: 'alm', nombre: 'Storage', err: 'Ubicaciones erróneas', module: 'storage', quality: 'alm_wrong_locations' },
-  { id: 'pic', nombre: 'Picking', err: 'Rechazos de Outbound', module: 'picking', quality: 'pic_rejections' },
+  { id: 'alm', nombre: 'Storage', err: 'Ubicaciones erróneas', module: 'storage', quality: 'alm_wrong_locations', autoStorage: true },
+  { id: 'pic', nombre: 'Picking', err: 'Rechazos de Outbound', module: 'picking', quality: 'pic_rejections', perPersonHour: true },
   {
     id: 'des',
     nombre: 'Outbound',
@@ -89,10 +93,52 @@ export const PROCESS_LEAD_POSITIONS: Partial<Record<ModuleId, string>> = {
   outbound: 'Jefe de Despacho',
 }
 
-export const SHIFTS: { id: ShiftId; hours: string }[] = [
-  { id: 'A', hours: '06:00–14:00' },
-  { id: 'B', hours: '14:00–22:00' },
-]
+/* ---------- Turnos (v7: configurables en Ajustes → Turnos) ---------- */
+
+export interface ShiftConfig {
+  enabled: boolean
+  /** Hora de inicio "HH:MM" (hora de El Salvador). */
+  start: string
+  /** Hora de fin "HH:MM". */
+  end: string
+}
+
+export type ShiftsConfig = Record<ShiftId, ShiftConfig>
+
+export const DEFAULT_SHIFTS: ShiftsConfig = {
+  A: { enabled: true, start: '06:00', end: '14:00' },
+  B: { enabled: true, start: '14:00', end: '22:00' },
+}
+
+export interface ShiftDef {
+  id: ShiftId
+  hours: string
+}
+
+/** Turnos habilitados, en orden (siempre al menos uno). */
+export function enabledShifts(cfg: ShiftsConfig = DEFAULT_SHIFTS): ShiftDef[] {
+  const list = (['A', 'B'] as ShiftId[])
+    .filter((id) => cfg[id]?.enabled)
+    .map((id) => ({ id, hours: `${cfg[id].start}–${cfg[id].end}` }))
+  return list.length ? list : [{ id: 'A', hours: `${cfg.A.start}–${cfg.A.end}` }]
+}
+
+/** Compatibilidad: lista de turnos por defecto (sin ajustes cargados). */
+export const SHIFTS: ShiftDef[] = enabledShifts(DEFAULT_SHIFTS)
+
+export const shiftHours = (cfg: ShiftsConfig, id: ShiftId) => `${cfg[id].start}–${cfg[id].end}`
+
+/**
+ * Storage (y cualquier cálculo que dependa del turno) trabaja "turno a turno"
+ * si A y B están habilitados, o "día a día" si solo hay uno.
+ */
+export type SlotMode = 'shift' | 'day'
+export const slotMode = (cfg: ShiftsConfig): SlotMode => (cfg.A.enabled && cfg.B.enabled ? 'shift' : 'day')
+
+const toMin = (hhmm: string) => {
+  const [h, m] = hhmm.split(':').map(Number)
+  return (h || 0) * 60 + (m || 0)
+}
 
 export interface ProcessGoal {
   id: ProcessId
@@ -101,33 +147,86 @@ export interface ProcessGoal {
   metaErr: number
   dot: number
   mc: number
+  /** Inbound (v7): dotación base por puesto. `dot` = dotRev + dotAux. */
+  dotRev?: number
+  dotAux?: number
+}
+
+export interface GlobalGoals {
+  frSuc: number
+  s5: number
+  preop: number
+  palletsPerContainer: number
+  /** Máximo de incidencias ISQ por turno (cuadro ISQ de Inbound). */
+  isqMax: number
+  /** v7: % del plan de pallets de Inbound que se vuelve plan de Storage. */
+  storagePct: number
+  /** v7: horas efectivas del turno para la productividad de Picking. */
+  pickHours: number
+  /** v7: el semáforo pasa a amarillo desde este % de la meta (rojo por debajo). */
+  warnPct: number
+  /** v7: en Calidad, amarillo hasta este margen sobre el máximo. */
+  errMargin: number
+  /** v7: niveles de Housekeeping (disciplinada / estable / riesgo, en %). */
+  hkOk: number
+  hkLv2: number
+  hkWarn: number
 }
 
 export interface Goals {
   procesos: ProcessGoal[]
-  /** `isqMax`: máximo de incidencias ISQ por turno (cuadro ISQ de Inbound). */
-  g: { frSuc: number; s5: number; preop: number; palletsPerContainer: number; isqMax: number }
+  g: GlobalGoals
+  /** v7: configuración de turnos (Ajustes → Turnos). */
+  shifts: ShiftsConfig
 }
 
 export const DEFAULT_GOALS: Goals = {
   procesos: [
-    { id: 'rec', unidad: 'contenedores', metaProd: 0, metaErr: 0, dot: 8, mc: 3 },
-    { id: 'alm', unidad: 'ubicaciones', metaProd: 10, metaErr: 0, dot: 6, mc: 4 },
+    { id: 'rec', unidad: 'contenedores', metaProd: 0, metaErr: 0, dot: 8, mc: 3, dotRev: 2, dotAux: 6 },
+    { id: 'alm', unidad: 'pallets', metaProd: 10, metaErr: 0, dot: 6, mc: 4 },
     { id: 'pic', unidad: 'líneas', metaProd: 45, metaErr: 2, dot: 18, mc: 3 },
     { id: 'des', unidad: 'pallets', metaProd: 8, metaErr: 0, dot: 10, mc: 3 },
   ],
-  g: { frSuc: 90, s5: 90, preop: 100, palletsPerContainer: 45, isqMax: 0 },
+  g: {
+    frSuc: 90,
+    s5: 90,
+    preop: 100,
+    palletsPerContainer: 45,
+    isqMax: 0,
+    storagePct: 50,
+    pickHours: 6.5,
+    warnPct: 90,
+    errMargin: 2,
+    hkOk: 90,
+    hkLv2: 75,
+    hkWarn: 60,
+  },
+  shifts: DEFAULT_SHIFTS,
 }
 
 /** Mezcla las metas guardadas con los valores por defecto (tolera jsonb incompleto). */
 export function normalizeGoals(raw: unknown): Goals {
   const r = (raw ?? {}) as Partial<Goals>
+  const shifts: ShiftsConfig = {
+    A: { ...DEFAULT_SHIFTS.A, ...r.shifts?.A },
+    B: { ...DEFAULT_SHIFTS.B, ...r.shifts?.B },
+  }
+  if (!shifts.A.enabled && !shifts.B.enabled) shifts.A.enabled = true
   return {
-    procesos: DEFAULT_GOALS.procesos.map((d) => ({
-      ...d,
-      ...(r.procesos ?? []).find((p) => p?.id === d.id),
-    })),
+    procesos: DEFAULT_GOALS.procesos.map((d) => {
+      const merged = { ...d, ...(r.procesos ?? []).find((p) => p?.id === d.id) }
+      if (d.id === 'rec') {
+        // Metas guardadas antes de v7 solo tienen `dot`: se reparte como el default.
+        if (merged.dotRev === undefined && merged.dotAux === undefined) {
+          merged.dotRev = Math.min(d.dotRev!, merged.dot)
+          merged.dotAux = Math.max(0, merged.dot - merged.dotRev)
+        }
+        merged.dot = (merged.dotRev ?? 0) + (merged.dotAux ?? 0)
+      }
+      return merged
+    }),
     g: { ...DEFAULT_GOALS.g, ...r.g },
+    shifts,
   }
 }
 
@@ -220,13 +319,49 @@ export function todaySV(now = new Date()): string {
   }).format(now)
 }
 
-/** Turno en curso según la hora de El Salvador (antes de las 14:00 = A). */
-export function currentShiftSV(now = new Date()): ShiftId {
-  const h = Number(
-    new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: 'numeric', hourCycle: 'h23' }).format(now),
-  )
-  return h < 14 ? 'A' : 'B'
+/** Minutos desde medianoche de un instante, en hora de El Salvador. */
+export function minutesSV(now: Date = new Date()): number {
+  const [h, m] = new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ,
+    hour: 'numeric',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  })
+    .format(now)
+    .split(':')
+    .map(Number)
+  return h * 60 + m
 }
+
+/**
+ * Turno en curso según la hora de El Salvador y la configuración de turnos:
+ * si solo hay uno habilitado, ese; si hay dos, B desde su hora de inicio y A
+ * el resto del día.
+ */
+export function currentShiftSV(now: Date = new Date(), cfg: ShiftsConfig = DEFAULT_SHIFTS): ShiftId {
+  if (slotMode(cfg) === 'day') return cfg.A.enabled ? 'A' : 'B'
+  return minutesSV(now) >= toMin(cfg.B.start) ? 'B' : 'A'
+}
+
+/**
+ * "Casilla" (turno o día) a la que pertenece un instante, para acumular
+ * registros automáticos (Registro x Pallet). Modo turno: desde el inicio de B
+ * → B; desde el inicio de A → A; antes del inicio de A → B del día anterior
+ * (madrugada). Modo día: la fecha.
+ */
+export function slotKeyOf(iso: string, cfg: ShiftsConfig): string {
+  const d = new Date(iso)
+  const date = todaySV(d)
+  if (slotMode(cfg) === 'day') return date
+  const m = minutesSV(d)
+  if (m >= toMin(cfg.B.start)) return `${date}|B`
+  if (m >= toMin(cfg.A.start)) return `${date}|A`
+  return `${addDays(date, -1)}|B`
+}
+
+/** Casilla que corresponde a una fecha + turno del tablero. */
+export const slotKeyFor = (date: string, shift: ShiftId, cfg: ShiftsConfig) =>
+  slotMode(cfg) === 'day' ? date : `${date}|${shift}`
 
 /** Días completos entre dos fechas YYYY-MM-DD (b − a). */
 export function daysBetween(a: string, b: string): number {

@@ -75,12 +75,15 @@ export const MODULE_VIEWS: Partial<Record<AccessDestination, ViewDef[]>> = {
   inbound: [
     { id: 'dialogo-tactico', label: 'Diálogo Táctico' },
     { id: 'isq', label: 'ISQ · Inbound-Storage Quality' },
+    { id: 'referencias', label: 'Control de Referencias' },
   ],
   storage: [
     { id: 'dialogo-tactico', label: 'Diálogo Táctico' },
     { id: 'isq', label: 'ISQ (reportar incidencia)' },
     { id: 'dash', label: 'Dash Storage' },
     { id: 'ajustes', label: 'Ajustes de Storage' },
+    { id: 'registro-pallet', label: 'Registro x Pallet' },
+    { id: 'referencias', label: 'Control de Referencias' },
   ],
   picking: [
     { id: 'dialogo-tactico', label: 'Diálogo Táctico' },

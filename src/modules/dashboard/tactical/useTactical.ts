@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { fetchSettings, fetchShiftData, subscribeTactical, type Settings, type TacticalData } from './api'
-import { currentShiftSV, todaySV, type ShiftId } from './config'
+import { currentShiftSV, todaySV, type ShiftId, type ShiftsConfig } from './config'
+import { applyThresholds } from './metrics'
 
 const POLL_MS = 60_000
 
 /**
- * Carga los datos de un turno + la configuración, y los mantiene al día:
+ * Carga la configuración + los datos de un turno, y los mantiene al día:
  * Supabase Realtime (cambios al instante) + re-consulta de respaldo cada 60 s.
+ * Los ajustes se leen primero porque de ellos dependen los cálculos
+ * automáticos (turnos habilitados → Storage turno a turno o día a día).
  */
 export function useTactical(date: string, shift: ShiftId) {
   const [data, setData] = useState<TacticalData | null>(null)
@@ -19,7 +22,9 @@ export function useTactical(date: string, shift: ShiftId) {
   const reload = useCallback(async () => {
     const id = ++req.current
     try {
-      const [d, s] = await Promise.all([fetchShiftData(date, shift), fetchSettings()])
+      const s = await fetchSettings()
+      applyThresholds(s.goals.g)
+      const d = await fetchShiftData(date, shift, s.goals)
       if (id !== req.current) return // respuesta vieja (cambió fecha/turno)
       setData(d)
       setSettings(s)
@@ -49,22 +54,30 @@ export function useTactical(date: string, shift: ShiftId) {
   return { data, settings, error, loadedAt, reload }
 }
 
-/** Fecha/turno que sigue al reloj (El Salvador) hasta que el usuario elige otro. */
-export function useLiveShift() {
+/**
+ * Fecha/turno que sigue al reloj (El Salvador) hasta que el usuario elige
+ * otro. Respeta los turnos habilitados y sus horarios (Ajustes → Turnos): si
+ * el turno elegido queda deshabilitado, salta al habilitado.
+ */
+export function useLiveShift(cfg?: ShiftsConfig) {
   const [follow, setFollow] = useState(true)
   const [date, setDateState] = useState(todaySV)
-  const [shift, setShiftState] = useState<ShiftId>(currentShiftSV)
+  const [shift, setShiftState] = useState<ShiftId>(() => currentShiftSV(new Date(), cfg))
 
   useEffect(() => {
     if (!follow) return
     const tick = () => {
       setDateState(todaySV())
-      setShiftState(currentShiftSV())
+      setShiftState(currentShiftSV(new Date(), cfg))
     }
     tick()
     const i = setInterval(tick, 30_000)
     return () => clearInterval(i)
-  }, [follow])
+  }, [follow, cfg])
+
+  useEffect(() => {
+    if (cfg && !cfg[shift]?.enabled) setShiftState(cfg.A.enabled ? 'A' : 'B')
+  }, [cfg, shift])
 
   return {
     date,
