@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { OptionCard } from '@/modules/dashboard/components/OptionCard'
 import { TacticalCaptureView } from '@/modules/dashboard/tactical/TacticalCaptureView'
 import { TACTICAL_VIEW, TacticalModuleOption } from '@/modules/dashboard/tactical/TacticalModuleOption'
+import { isViewDenied } from '@/modules/admin/lib/accessLevels'
 import { IsqDashboard } from '@/modules/storage/isq/IsqDashboard'
 import { IsqReportView } from '@/modules/storage/isq/IsqReportView'
 import { IsqSettingsView } from '@/modules/storage/isq/IsqSettingsView'
@@ -31,12 +32,22 @@ const VIEWS = {
  *   - Ajustes de Storage → ISQ (jefe de Storage, gerencia, admin)
  * La tarjeta usa el `OptionCard` del Dashboard (el mismo que ya usa
  * `TacticalModuleOption` aquí) para no crear una quinta copia.
+ *
+ * Cada tarjeta y cada `?view=` directo se protegen además con `isViewDenied`
+ * (agregado 2026-09-29 — ver ARCHITECTURE.md → "Niveles de acceso (catálogo
+ * dinámico)" → "Ampliación 2026-09-29 (cuarta parte)"). `ajustes-isq` no está
+ * en `MODULE_VIEWS` (es un nivel anidado dentro de "Ajustes", no una pantalla
+ * de primer nivel — mismo criterio que ya usaba `canConfigure`), así que se
+ * protege con el id de su padre (`VIEWS.settings`), no con el suyo propio.
  */
 export default function StorageModule() {
   const [params, setParams] = useSearchParams()
   const view = params.get('view')
   const { adminUser } = useAuth()
   const canConfigure = canConfigureIsq(adminUser)
+  const isqDenied = isViewDenied(adminUser, 'storage', VIEWS.isq)
+  const dashDenied = isViewDenied(adminUser, 'storage', VIEWS.dash)
+  const settingsDenied = isViewDenied(adminUser, 'storage', VIEWS.settings)
 
   function goTo(next: string | null) {
     if (next) setParams({ view: next })
@@ -53,31 +64,37 @@ export default function StorageModule() {
             ← {back ? 'Volver a Ajustes de Storage' : 'Volver a Storage'}
           </button>
           {view === TACTICAL_VIEW ? <TacticalCaptureView moduleId="storage" /> : null}
-          {view === VIEWS.isq ? <IsqReportView /> : null}
-          {view === VIEWS.dash ? <IsqDashboard color={moduleDef.color} /> : null}
+          {view === VIEWS.isq ? (isqDenied ? <NoAccess /> : <IsqReportView />) : null}
+          {view === VIEWS.dash ? (dashDenied ? <NoAccess /> : <IsqDashboard color={moduleDef.color} />) : null}
           {view === VIEWS.settings ? (
-            canConfigure ? <StorageSettingsHome onNavigate={goTo} /> : <NoAccess />
+            canConfigure && !settingsDenied ? <StorageSettingsHome onNavigate={goTo} /> : <NoAccess />
           ) : null}
-          {view === VIEWS.settingsIsq ? canConfigure ? <IsqSettingsView /> : <NoAccess /> : null}
+          {view === VIEWS.settingsIsq ? (
+            canConfigure && !settingsDenied ? <IsqSettingsView /> : <NoAccess />
+          ) : null}
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
-          <OptionCard
-            color={moduleDef.color}
-            icon="📦"
-            title={ISQ_NAME}
-            description="Reporta a Inbound las incidencias encontradas al almacenar: pallet dañado, mal estibado, SKU o etiqueta incorrecta, etc."
-            onClick={() => goTo(VIEWS.isq)}
-          />
-          <OptionCard
-            color={moduleDef.color}
-            icon="📊"
-            title="Dash Storage"
-            description="Dashboard de Storage: incidencias ISQ del día (o del rango que elijas) por tipo, almacenador, turno y estado."
-            onClick={() => goTo(VIEWS.dash)}
-          />
+          {!isqDenied ? (
+            <OptionCard
+              color={moduleDef.color}
+              icon="📦"
+              title={ISQ_NAME}
+              description="Reporta a Inbound las incidencias encontradas al almacenar: pallet dañado, mal estibado, SKU o etiqueta incorrecta, etc."
+              onClick={() => goTo(VIEWS.isq)}
+            />
+          ) : null}
+          {!dashDenied ? (
+            <OptionCard
+              color={moduleDef.color}
+              icon="📊"
+              title="Dash Storage"
+              description="Dashboard de Storage: incidencias ISQ del día (o del rango que elijas) por tipo, almacenador, turno y estado."
+              onClick={() => goTo(VIEWS.dash)}
+            />
+          ) : null}
           <TacticalModuleOption moduleId="storage" onNavigate={goTo} />
-          {canConfigure ? (
+          {canConfigure && !settingsDenied ? (
             <OptionCard
               color={moduleDef.color}
               icon="⚙️"
@@ -111,5 +128,5 @@ function StorageSettingsHome({ onNavigate }: { onNavigate: (v: string) => void }
 }
 
 function NoAccess() {
-  return <p className="text-sm text-white/55">Solo el jefe de Storage, gerencia o admin pueden entrar a Ajustes de Storage.</p>
+  return <p className="text-sm text-white/55">Tu nivel de acceso no tiene esta pantalla habilitada.</p>
 }

@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 
-import type { AdminView, ModulePermission } from '@/lib/supabase'
+import type { AccessDestination, ModulePermission } from '@/lib/supabase'
 import { fieldControlClass, fieldLabelClass, ringStyle } from '@/modules/admin/components/formStyles'
 import {
   ACCESS_DESTINATIONS,
-  ADMIN_VIEWS,
+  MODULE_VIEWS,
   createAccessLevel,
   deleteAccessLevel,
   fetchAccessLevels,
@@ -25,54 +25,68 @@ const LEGACY_LABEL: Record<string, string> = {
 /** Selector de permiso: 'none' = sin acceso a esa pantalla/módulo. */
 type Selection = 'none' | ModulePermission
 type SelectionMap = Record<string, Selection>
-type AdminViewSelectionMap = Record<AdminView, Selection>
 
 interface MatrixState {
-  /** Selección por destino, para los 6 destinos que siguen siendo "módulo completo". */
+  /** Selección por destino — "todas las opciones del módulo" (solo se usa cuando ese destino NO está en modo específico). */
   selections: SelectionMap
-  /** Selección por pantalla, solo para 'admin' (Configuraciones y Administradores). */
-  adminViews: AdminViewSelectionMap
+  /** Por destino: true = "elegir opciones específicas" (mostrar el desglose por pantalla en vez del selector único). */
+  specificMode: Record<string, boolean>
+  /** Selección por pantalla, por destino — solo relevante cuando `specificMode[destino]` es true. */
+  viewSelections: Record<string, SelectionMap>
 }
 
-function emptyAdminViews(): AdminViewSelectionMap {
-  return Object.fromEntries(ADMIN_VIEWS.map((v) => [v.id, 'none' as Selection])) as AdminViewSelectionMap
+function emptyViewSelections(destination: AccessDestination): SelectionMap {
+  const views = MODULE_VIEWS[destination] ?? []
+  return Object.fromEntries(views.map((v) => [v.id, 'none' as Selection]))
 }
 
 function emptyMatrixState(): MatrixState {
   return {
     selections: Object.fromEntries(ACCESS_DESTINATIONS.map((d) => [d.id, 'none' as Selection])),
-    adminViews: emptyAdminViews(),
+    specificMode: Object.fromEntries(ACCESS_DESTINATIONS.map((d) => [d.id, false])),
+    viewSelections: Object.fromEntries(ACCESS_DESTINATIONS.map((d) => [d.id, emptyViewSelections(d.id)])),
   }
 }
 
 function matrixStateFromModules(modules: AccessLevelModuleRow[]): MatrixState {
   const state = emptyMatrixState()
-  for (const m of modules) {
-    if (m.module === 'admin' && m.view !== 'all') {
-      state.adminViews[m.view as AdminView] = m.permission
+  for (const d of ACCESS_DESTINATIONS) {
+    const rows = modules.filter((m) => m.module === d.id)
+    if (!rows.length) continue
+    const hasSpecific = rows.some((m) => m.view !== 'all')
+    if (hasSpecific) {
+      state.specificMode[d.id] = true
+      for (const m of rows) {
+        if (m.view !== 'all') state.viewSelections[d.id][m.view] = m.permission
+      }
     } else {
-      state.selections[m.module] = m.permission
+      state.selections[d.id] = rows[0].permission
     }
   }
   return state
 }
 
 /**
- * "admin" siempre se guarda como pantallas sueltas (nunca una fila "todas"),
- * para que quede claro en la matriz exactamente qué pantallas tiene — el
- * botón "Marcar todas" es solo un atajo para llenarlas todas de una vez, no
- * un modo aparte.
+ * Por destino: si está en modo "opciones específicas" se guarda una fila por
+ * pantalla elegida (nunca una fila "todas"); si no, una única fila
+ * `view: 'all'` si se eligió algo — nunca ambas para el mismo destino. Una
+ * fila `'all'` cubre automáticamente cualquier pantalla nueva que un chat de
+ * módulo agregue después (ver comentario de `MODULE_VIEWS`); las filas
+ * específicas no.
  */
 function modulesFromMatrixState(state: MatrixState): AccessLevelModuleRow[] {
   const rows: AccessLevelModuleRow[] = []
   for (const d of ACCESS_DESTINATIONS) {
-    if (d.id === 'admin') continue
-    const sel = state.selections[d.id]
-    if (sel !== 'none') rows.push({ module: d.id, view: 'all', permission: sel as ModulePermission })
-  }
-  for (const v of ADMIN_VIEWS) {
-    const sel = state.adminViews[v.id]
-    if (sel !== 'none') rows.push({ module: 'admin', view: v.id, permission: sel as ModulePermission })
+    if (state.specificMode[d.id]) {
+      const views = MODULE_VIEWS[d.id] ?? []
+      for (const v of views) {
+        const sel = state.viewSelections[d.id][v.id]
+        if (sel !== 'none') rows.push({ module: d.id, view: v.id, permission: sel as ModulePermission })
+      }
+    } else {
+      const sel = state.selections[d.id]
+      if (sel !== 'none') rows.push({ module: d.id, view: 'all', permission: sel as ModulePermission })
+    }
   }
   return rows
 }
@@ -80,15 +94,17 @@ function modulesFromMatrixState(state: MatrixState): AccessLevelModuleRow[] {
 /** Resumen legible de la matriz para la columna "Accesos" de la tabla. */
 function summarizeModules(modules: AccessLevelModuleRow[]): string {
   if (!modules.length) return 'Sin accesos asignados'
-  const adminRows = modules.filter((m) => m.module === 'admin')
-  const otherRows = modules.filter((m) => m.module !== 'admin')
-  const parts = otherRows.map(
-    (m) => `${ACCESS_DESTINATIONS.find((d) => d.id === m.module)?.label ?? m.module} (${m.permission})`,
-  )
-  if (adminRows.length) {
-    parts.push(
-      `Configuraciones y Administradores (${adminRows.length} de ${ADMIN_VIEWS.length} pantalla${adminRows.length > 1 ? 's' : ''})`,
-    )
+  const parts: string[] = []
+  for (const d of ACCESS_DESTINATIONS) {
+    const rows = modules.filter((m) => m.module === d.id)
+    if (!rows.length) continue
+    const specificRows = rows.filter((m) => m.view !== 'all')
+    if (specificRows.length) {
+      const total = MODULE_VIEWS[d.id]?.length ?? specificRows.length
+      parts.push(`${d.label} (${specificRows.length} de ${total} opción${specificRows.length > 1 ? 'es' : ''})`)
+    } else {
+      parts.push(`${d.label} (${rows[0].permission})`)
+    }
   }
   return parts.join(', ')
 }
@@ -108,90 +124,128 @@ function modules_extra(modules: AccessLevelModuleRow[]): boolean {
   return modules.length > 0
 }
 
-function MatrixEditor({
-  state,
+function PermissionSelect({
+  value,
   onChange,
-  onAdminViewChange,
-  onAdminBulkSet,
   disabled,
 }: {
-  state: MatrixState
-  onChange: (destination: string, value: Selection) => void
-  onAdminViewChange: (view: AdminView, value: Selection) => void
-  onAdminBulkSet: (value: Selection) => void
+  value: Selection
+  onChange: (value: Selection) => void
   disabled?: boolean
 }) {
   return (
-    <div className="flex flex-col gap-4 sm:col-span-2">
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-        {ACCESS_DESTINATIONS.filter((d) => d.id !== 'admin').map((d) => (
-          <label key={d.id} className={`${fieldLabelClass} flex items-center justify-between gap-3`}>
-            <span>{d.label}</span>
-            <select
-              value={state.selections[d.id]}
-              onChange={(e) => onChange(d.id, e.target.value as Selection)}
-              className="rounded-lg border border-neurale-border bg-white/5 px-2 py-1.5 text-xs text-white focus:outline-none focus:ring-2 disabled:opacity-50"
-              style={ringStyle(ADMIN_SECTION.color)}
-              disabled={disabled}
-            >
-              <option value="none">Sin acceso</option>
-              <option value="ver">Ver</option>
-              <option value="editar">Editar</option>
-            </select>
-          </label>
-        ))}
-      </div>
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value as Selection)}
+      className="rounded-lg border border-neurale-border bg-white/5 px-2 py-1.5 text-xs text-white focus:outline-none focus:ring-2 disabled:opacity-50"
+      style={ringStyle(ADMIN_SECTION.color)}
+      disabled={disabled}
+    >
+      <option value="none">Sin acceso</option>
+      <option value="ver">Ver</option>
+      <option value="editar">Editar</option>
+    </select>
+  )
+}
 
-      <div className="rounded-lg border border-neurale-border/60 p-3">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <span className="text-xs font-semibold text-white/70">
-            Configuraciones y Administradores — por pantalla
-          </span>
-          {!disabled ? (
-            <div className="flex gap-3 text-[11px]">
-              <button
-                type="button"
-                onClick={() => onAdminBulkSet('editar')}
-                className="text-white/50 hover:text-white/80"
-              >
-                Marcar todas: Editar
-              </button>
-              <button
-                type="button"
-                onClick={() => onAdminBulkSet('ver')}
-                className="text-white/50 hover:text-white/80"
-              >
-                Ver
-              </button>
-              <button
-                type="button"
-                onClick={() => onAdminBulkSet('none')}
-                className="text-white/50 hover:text-white/80"
-              >
-                Ninguna
-              </button>
+/**
+ * Matriz de acceso: un bloque por destino. Si el destino tiene pantallas
+ * conocidas en `MODULE_VIEWS`, se puede marcar "Elegir opciones específicas"
+ * para pasar del selector único (todo el módulo) a un desglose pantalla por
+ * pantalla — igual que ya existía solo para Configuraciones y Administradores
+ * (ampliado 2026-09-29 a los 7 destinos, ver ARCHITECTURE.md).
+ */
+function MatrixEditor({
+  state,
+  onChange,
+  onToggleSpecific,
+  onViewChange,
+  onBulkSet,
+  disabled,
+}: {
+  state: MatrixState
+  onChange: (destination: AccessDestination, value: Selection) => void
+  onToggleSpecific: (destination: AccessDestination, specific: boolean) => void
+  onViewChange: (destination: AccessDestination, view: string, value: Selection) => void
+  onBulkSet: (destination: AccessDestination, value: Selection) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex flex-col gap-3 sm:col-span-2">
+      {ACCESS_DESTINATIONS.map((d) => {
+        const views = MODULE_VIEWS[d.id] ?? []
+        const canBeSpecific = views.length > 0
+        const specific = canBeSpecific && state.specificMode[d.id]
+
+        return (
+          <div key={d.id} className="rounded-lg border border-neurale-border/60 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span className="text-sm font-medium text-white/80">{d.label}</span>
+              {!specific ? (
+                <PermissionSelect
+                  value={state.selections[d.id]}
+                  onChange={(value) => onChange(d.id, value)}
+                  disabled={disabled}
+                />
+              ) : null}
             </div>
-          ) : null}
-        </div>
-        <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {ADMIN_VIEWS.map((v) => (
-            <label key={v.id} className={`${fieldLabelClass} flex items-center justify-between gap-3`}>
-              <span>{v.label}</span>
-              <select
-                value={state.adminViews[v.id]}
-                onChange={(e) => onAdminViewChange(v.id, e.target.value as Selection)}
-                className="rounded-lg border border-neurale-border bg-white/5 px-2 py-1.5 text-xs text-white focus:outline-none focus:ring-2 disabled:opacity-50"
-                style={ringStyle(ADMIN_SECTION.color)}
-                disabled={disabled}
-              >
-                <option value="none">Sin acceso</option>
-                <option value="ver">Ver</option>
-                <option value="editar">Editar</option>
-              </select>
-            </label>
-          ))}
-        </div>
-      </div>
+
+            {canBeSpecific ? (
+              <label className="mt-2 flex items-center gap-2 text-[11px] text-white/50">
+                <input
+                  type="checkbox"
+                  checked={specific}
+                  onChange={(e) => onToggleSpecific(d.id, e.target.checked)}
+                  disabled={disabled}
+                />
+                Elegir opciones específicas
+              </label>
+            ) : null}
+
+            {specific ? (
+              <div className="mt-3 border-t border-neurale-border/40 pt-3">
+                {!disabled ? (
+                  <div className="mb-2 flex gap-3 text-[11px]">
+                    <button
+                      type="button"
+                      onClick={() => onBulkSet(d.id, 'editar')}
+                      className="text-white/50 hover:text-white/80"
+                    >
+                      Marcar todas: Editar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onBulkSet(d.id, 'ver')}
+                      className="text-white/50 hover:text-white/80"
+                    >
+                      Ver
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onBulkSet(d.id, 'none')}
+                      className="text-white/50 hover:text-white/80"
+                    >
+                      Ninguna
+                    </button>
+                  </div>
+                ) : null}
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {views.map((v) => (
+                    <label key={v.id} className={`${fieldLabelClass} flex items-center justify-between gap-3`}>
+                      <span>{v.label}</span>
+                      <PermissionSelect
+                        value={state.viewSelections[d.id][v.id]}
+                        onChange={(value) => onViewChange(d.id, v.id, value)}
+                        disabled={disabled}
+                      />
+                    </label>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        )
+      })}
     </div>
   )
 }
@@ -356,13 +410,27 @@ export function AccessLevelsView() {
             onChange={(destination, value) =>
               setMatrix((prev) => ({ ...prev, selections: { ...prev.selections, [destination]: value } }))
             }
-            onAdminViewChange={(view, value) =>
-              setMatrix((prev) => ({ ...prev, adminViews: { ...prev.adminViews, [view]: value } }))
+            onToggleSpecific={(destination, specific) =>
+              setMatrix((prev) => ({ ...prev, specificMode: { ...prev.specificMode, [destination]: specific } }))
             }
-            onAdminBulkSet={(value) =>
+            onViewChange={(destination, view, value) =>
               setMatrix((prev) => ({
                 ...prev,
-                adminViews: Object.fromEntries(ADMIN_VIEWS.map((v) => [v.id, value])) as AdminViewSelectionMap,
+                viewSelections: {
+                  ...prev.viewSelections,
+                  [destination]: { ...prev.viewSelections[destination], [view]: value },
+                },
+              }))
+            }
+            onBulkSet={(destination, value) =>
+              setMatrix((prev) => ({
+                ...prev,
+                viewSelections: {
+                  ...prev.viewSelections,
+                  [destination]: Object.fromEntries(
+                    (MODULE_VIEWS[destination] ?? []).map((v) => [v.id, value]),
+                  ),
+                },
               }))
             }
           />
@@ -427,13 +495,27 @@ export function AccessLevelsView() {
               onChange={(destination, value) =>
                 setEditMatrix((prev) => ({ ...prev, selections: { ...prev.selections, [destination]: value } }))
               }
-              onAdminViewChange={(view, value) =>
-                setEditMatrix((prev) => ({ ...prev, adminViews: { ...prev.adminViews, [view]: value } }))
+              onToggleSpecific={(destination, specific) =>
+                setEditMatrix((prev) => ({ ...prev, specificMode: { ...prev.specificMode, [destination]: specific } }))
               }
-              onAdminBulkSet={(value) =>
+              onViewChange={(destination, view, value) =>
                 setEditMatrix((prev) => ({
                   ...prev,
-                  adminViews: Object.fromEntries(ADMIN_VIEWS.map((v) => [v.id, value])) as AdminViewSelectionMap,
+                  viewSelections: {
+                    ...prev.viewSelections,
+                    [destination]: { ...prev.viewSelections[destination], [view]: value },
+                  },
+                }))
+              }
+              onBulkSet={(destination, value) =>
+                setEditMatrix((prev) => ({
+                  ...prev,
+                  viewSelections: {
+                    ...prev.viewSelections,
+                    [destination]: Object.fromEntries(
+                      (MODULE_VIEWS[destination] ?? []).map((v) => [v.id, value]),
+                    ),
+                  },
                 }))
               }
             />

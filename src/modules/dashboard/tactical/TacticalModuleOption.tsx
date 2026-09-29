@@ -1,4 +1,5 @@
 import { OptionCard } from '@/modules/dashboard/components/OptionCard'
+import { isViewDenied } from '@/modules/admin/lib/accessLevels'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { MODULES, type ModuleId } from '@/shared/modules'
 
@@ -9,7 +10,10 @@ export const TACTICAL_VIEW = 'dialogo-tactico'
 
 /**
  * Tarjeta "Diálogo Táctico" para el menú de opciones de un módulo. Solo la ve
- * quien puede capturar (jefe de área del módulo, gerencia, admin).
+ * quien puede capturar (jefe de área del módulo, gerencia, admin) — o, desde
+ * 2026-09-29, un nivel de acceso con esta pantalla habilitada en modo
+ * "opciones específicas" (`isViewDenied`, ver ARCHITECTURE.md). "Sin acceso"
+ * en ese modo la oculta de verdad, no solo cosmético.
  */
 export function TacticalModuleOption({
   moduleId,
@@ -22,6 +26,7 @@ export function TacticalModuleOption({
   const mod = MODULES.find((m) => m.id === moduleId)!
   const proc = processForModule(moduleId)
   if (!hasTacticalOption(moduleId) || !adminUser || adminUser.access_level === 'operador') return null
+  if (isViewDenied(adminUser, moduleId, TACTICAL_VIEW)) return null
   return (
     <OptionCard
       color={mod.color}

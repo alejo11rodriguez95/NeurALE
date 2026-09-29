@@ -1,12 +1,11 @@
 import { useSearchParams } from 'react-router-dom'
 
-import type { AdminView } from '@/lib/supabase'
 import { AdminHome } from '@/modules/admin/AdminHome'
 import { AccessLevelsView } from '@/modules/admin/access-levels/AccessLevelsView'
 import { BranchesView } from '@/modules/admin/branches/BranchesView'
 import { DocksView } from '@/modules/admin/docks/DocksView'
 import { EmployeesView } from '@/modules/admin/employees/EmployeesView'
-import { canSeeAdminView } from '@/modules/admin/lib/accessLevels'
+import { canSeeAdminView, MODULE_VIEWS } from '@/modules/admin/lib/accessLevels'
 import { PositionsView } from '@/modules/admin/positions/PositionsView'
 import { SettingsView } from '@/modules/admin/settings/SettingsView'
 import { UsersRolesView } from '@/modules/admin/users/UsersRolesView'
@@ -14,7 +13,7 @@ import { ModuleScreen } from '@/shared/components/ModuleScreen'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { ADMIN_SECTION } from '@/shared/modules'
 
-const ADMIN_VIEW_IDS: AdminView[] = ['ajustes', 'usuarios', 'niveles', 'empleados', 'puestos', 'muelles', 'sucursales']
+const ADMIN_VIEW_IDS: string[] = (MODULE_VIEWS.admin ?? []).map((v) => v.id)
 
 /**
  * Punto de entrada de Configuraciones y Administradores. Mismo patrón `?view=`
@@ -32,7 +31,7 @@ export default function AdminModule() {
     else setParams({})
   }
 
-  const isKnownView = (v: string): v is AdminView => (ADMIN_VIEW_IDS as string[]).includes(v)
+  const isKnownView = (v: string): boolean => ADMIN_VIEW_IDS.includes(v)
   const allowed = view && isKnownView(view) && adminUser ? canSeeAdminView(adminUser, view) : false
 
   return (

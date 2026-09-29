@@ -4,6 +4,8 @@ import { PickingHome } from '@/modules/picking/PickingHome'
 import { QualityManagementView } from '@/modules/picking/quality-control/QualityManagementView'
 import { TacticalCaptureView } from '@/modules/dashboard/tactical/TacticalCaptureView'
 import { TACTICAL_VIEW } from '@/modules/dashboard/tactical/TacticalModuleOption'
+import { isViewDenied } from '@/modules/admin/lib/accessLevels'
+import { useAuth } from '@/shared/auth/AuthContext'
 import { ModuleScreen } from '@/shared/components/ModuleScreen'
 import { MODULES } from '@/shared/modules'
 
@@ -14,10 +16,17 @@ const moduleDef = MODULES.find((m) => m.id === 'picking')!
  * desde el chat de Outbound (ver ARCHITECTURE.md — es la única pantalla de
  * negocio de Picking hasta que se trabaje su propio chat). Usa el mismo
  * patrón de navegación por `?view=` que Outbound.
+ *
+ * `?view=` directo se protege además con `isViewDenied` (agregado
+ * 2026-09-29 — ver ARCHITECTURE.md → "Niveles de acceso (catálogo
+ * dinámico)" → "Ampliación 2026-09-29 (cuarta parte)"); el filtro de la
+ * tarjeta en sí vive en `PickingHome.tsx`.
  */
 export default function PickingModule() {
+  const { adminUser } = useAuth()
   const [params, setParams] = useSearchParams()
   const view = params.get('view')
+  const denied = view ? isViewDenied(adminUser, 'picking', view) : false
 
   function goTo(next: string | null) {
     if (next) setParams({ view: next })
@@ -34,8 +43,14 @@ export default function PickingModule() {
           >
             ← Volver a Picking
           </button>
-          {view === 'calidad' ? <QualityManagementView /> : null}
-          {view === TACTICAL_VIEW ? <TacticalCaptureView moduleId="picking" /> : null}
+          {denied ? (
+            <p className="text-sm text-white/55">Tu nivel de acceso no tiene esta pantalla habilitada.</p>
+          ) : (
+            <>
+              {view === 'calidad' ? <QualityManagementView /> : null}
+              {view === TACTICAL_VIEW ? <TacticalCaptureView moduleId="picking" /> : null}
+            </>
+          )}
         </div>
       ) : (
         <PickingHome onNavigate={goTo} />

@@ -1,4 +1,4 @@
-import type { AccessDestination, AdminUser, AdminView, ModulePermission } from '@/lib/supabase'
+import type { AccessDestination, AdminUser, ModulePermission } from '@/lib/supabase'
 import { supabase } from '@/lib/supabase'
 import { ALL_MODULES } from '@/shared/modules'
 
@@ -45,28 +45,71 @@ export const ACCESS_DESTINATIONS: { id: AccessDestination; label: string }[] = A
   label: m.label,
 }))
 
+export interface ViewDef {
+  id: string
+  label: string
+}
+
 /**
- * Las 7 pantallas de Configuraciones y Administradores — único destino con
- * desglose por pantalla (ver comentario de la migración
- * `20260929090000_admin_access_levels_view_and_editable.sql` sobre por qué
- * los otros 6 destinos se quedan en "módulo completo" por ahora).
+ * Pantallas conocidas dentro de cada uno de los 7 destinos — para el modo
+ * "elegir opciones específicas" de un nivel de acceso (ampliado 2026-09-29,
+ * ver ARCHITECTURE.md → "Niveles de acceso (catálogo dinámico)" →
+ * "Granularidad por pantalla en todos los módulos"). Es un registro manual,
+ * igual que `shared/modules.ts`: cuando un chat de módulo agregue una
+ * pantalla nueva (un `?view=` nuevo), hay que sumarle una línea aquí. Si no
+ * se hace, esa pantalla nueva sigue quedando cubierta por el modo "todas las
+ * opciones del módulo" quien lo tenga así configurado — nunca queda fuera
+ * silenciosamente, solo no aparece como opción individual hasta que se
+ * agregue aquí.
  */
-export const ADMIN_VIEWS: { id: AdminView; label: string }[] = [
-  { id: 'ajustes', label: 'Ajustes de la plataforma' },
-  { id: 'usuarios', label: 'Usuarios y Roles' },
-  { id: 'niveles', label: 'Niveles de Acceso' },
-  { id: 'empleados', label: 'Empleados' },
-  { id: 'puestos', label: 'Puestos' },
-  { id: 'muelles', label: 'Muelles' },
-  { id: 'sucursales', label: 'Sucursales' },
-]
+export const MODULE_VIEWS: Partial<Record<AccessDestination, ViewDef[]>> = {
+  admin: [
+    { id: 'ajustes', label: 'Ajustes de la plataforma' },
+    { id: 'usuarios', label: 'Usuarios y Roles' },
+    { id: 'niveles', label: 'Niveles de Acceso' },
+    { id: 'empleados', label: 'Empleados' },
+    { id: 'puestos', label: 'Puestos' },
+    { id: 'muelles', label: 'Muelles' },
+    { id: 'sucursales', label: 'Sucursales' },
+  ],
+  inbound: [
+    { id: 'dialogo-tactico', label: 'Diálogo Táctico' },
+    { id: 'isq', label: 'ISQ · Inbound-Storage Quality' },
+  ],
+  storage: [
+    { id: 'dialogo-tactico', label: 'Diálogo Táctico' },
+    { id: 'isq', label: 'ISQ (reportar incidencia)' },
+    { id: 'dash', label: 'Dash Storage' },
+    { id: 'ajustes', label: 'Ajustes de Storage' },
+  ],
+  picking: [
+    { id: 'dialogo-tactico', label: 'Diálogo Táctico' },
+    { id: 'calidad', label: 'Gestión de Control de Calidad' },
+  ],
+  outbound: [
+    { id: 'dialogo-tactico', label: 'Diálogo Táctico' },
+    { id: 'calidad', label: 'Control de Calidad' },
+    { id: 'rutas', label: 'Gestión de Rutas' },
+  ],
+  inventory: [{ id: 'dialogo-tactico', label: 'Diálogo Táctico' }],
+  dashboard: [
+    { id: 'dialogo', label: 'Diálogo Táctico CD Nneo (tablero)' },
+    { id: 'isq', label: 'ISQ · Inbound-Storage (tablero)' },
+  ],
+}
 
 /**
  * Pantallas de Configuraciones y Administradores que cada nivel de sistema ve
  * por defecto, sin depender de la matriz — es exactamente el comportamiento
- * de siempre (ver `AdminHome.tsx`, antes hardcodeado ahí). `'all'` = las 7.
+ * de siempre (ver `AdminHome.tsx`, antes hardcodeado ahí). `'all'` = todas.
+ * Los otros 6 destinos no tienen un "de siempre" por pantalla igual de fino:
+ * cada uno ya filtra su propia tarjeta a su manera (jefe_area/gerencia/admin
+ * de siempre, o `hasModuleAccess`/`canManageModule` para acceso EXTRA vía
+ * matriz) — `isViewDenied` (ver abajo) se agrega ENCIMA de esas reglas, sin
+ * reemplazarlas, para bloquear puntualmente una pantalla que el nivel de
+ * acceso marcó "Sin acceso" en modo "opciones específicas".
  */
-const DEFAULT_ADMIN_VIEWS: Partial<Record<LegacyAccessKey, AdminView[] | 'all'>> = {
+const DEFAULT_ADMIN_VIEWS: Partial<Record<LegacyAccessKey, string[] | 'all'>> = {
   admin: 'all',
   gerencia: 'all',
   jefe_area: ['usuarios', 'empleados', 'puestos', 'muelles', 'sucursales'],
@@ -80,16 +123,52 @@ const DEFAULT_ADMIN_VIEWS: Partial<Record<LegacyAccessKey, AdminView[] | 'all'>>
  * "todas las pantallas" si la tiene). Aditivo: nunca le quita a nadie lo que
  * ya veía por defecto.
  */
-export function canSeeAdminView(user: AdminUser, view: AdminView): boolean {
+export function canSeeAdminView(user: AdminUser, view: string): boolean {
   const legacy = user.access_level in DEFAULT_ADMIN_VIEWS ? (user.access_level as LegacyAccessKey) : null
   const byDefault = legacy ? DEFAULT_ADMIN_VIEWS[legacy] : undefined
   if (byDefault === 'all') return true
   if (Array.isArray(byDefault) && byDefault.includes(view)) return true
 
-  if (user.adminViewAccess && Object.keys(user.adminViewAccess).length > 0) {
-    return !!user.adminViewAccess[view]
+  const adminViews = user.viewAccess?.admin
+  if (adminViews && Object.keys(adminViews).length > 0) {
+    return !!adminViews[view]
   }
   return !!user.moduleAccess?.admin
+}
+
+/**
+ * ¿Este usuario tiene BLOQUEADA, específicamente, esta pantalla de este
+ * destino? (ampliado 2026-09-29 — ver ARCHITECTURE.md → "Niveles de acceso
+ * (catálogo dinámico)" → "Ampliación 2026-09-29 (cuarta parte): Sin acceso
+ * bloquea de verdad, no solo la tarjeta"). Josué pidió que "Sin acceso" en
+ * un nivel de acceso impida entrar de verdad — ni siquiera ver — en vez de
+ * solo ocultar la tarjeta del menú mientras la URL directa seguía abierta.
+ *
+ * Es puramente RESTRICTIVO y solo sobre acceso EXTRA (matriz): nunca bloquea
+ * a admin/gerencia ni al dueño de siempre de un módulo de negocio (jefe_area/
+ * operador en su propio `module`, vía `user.module === destination`) — ese
+ * acceso de toda la vida nunca se toca, ni para sumar ni para quitar, exista
+ * o no una matriz configurada. Si el nivel del usuario no usa "opciones
+ * específicas" para este destino (matriz vacía o guardada como "todas las
+ * opciones", `view: 'all'`), esta función no bloquea nada nuevo — se sigue
+ * dependiendo por completo de las reglas de acceso de siempre de esa
+ * pantalla (p. ej. `hasModuleAccess`/`canManageModule`, o el propio filtro
+ * de `TacticalModuleOption`), sin tocarlas.
+ *
+ * Cada módulo de negocio (y el Dashboard Neuronal) debe llamar esta función
+ * ADEMÁS de sus propias reglas — nunca en vez de ellas — antes de mostrar
+ * una tarjeta o de entrar por `?view=` directo a una de sus pantallas
+ * conocidas en `MODULE_VIEWS`. Configuraciones y Administradores no la usa:
+ * ya tiene su propio equivalente más fino, `canSeeAdminView` (arriba), que
+ * además conoce los defaults de jefe_area/operador para esta sección.
+ */
+export function isViewDenied(user: AdminUser | null, destination: AccessDestination, viewId: string): boolean {
+  if (!user) return false
+  if (user.access_level === 'admin' || user.access_level === 'gerencia') return false
+  if (user.module === destination) return false
+  const views = user.viewAccess?.[destination]
+  if (!views || Object.keys(views).length === 0) return false
+  return !views[viewId]
 }
 
 export async function fetchAccessLevels(): Promise<AccessLevelWithModules[]> {

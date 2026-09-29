@@ -2,6 +2,8 @@ import { useSearchParams } from 'react-router-dom'
 
 import { TacticalCaptureView } from '@/modules/dashboard/tactical/TacticalCaptureView'
 import { TACTICAL_VIEW, TacticalModuleOption } from '@/modules/dashboard/tactical/TacticalModuleOption'
+import { isViewDenied } from '@/modules/admin/lib/accessLevels'
+import { useAuth } from '@/shared/auth/AuthContext'
 import { ModuleScreen } from '@/shared/components/ModuleScreen'
 import { MODULES } from '@/shared/modules'
 
@@ -12,10 +14,17 @@ const moduleDef = MODULES.find((m) => m.id === 'inventory')!
  * (agregada desde el chat del Dashboard Neuronal — ver ARCHITECTURE.md). El
  * chat propio de Inventory agrega sus pantallas como tarjetas nuevas en este menú,
  * con el mismo patrón `?view=` que Outbound, sin reemplazar el archivo.
+ *
+ * `?view=` directo se protege además con `isViewDenied` (agregado
+ * 2026-09-29 — ver ARCHITECTURE.md → "Niveles de acceso (catálogo
+ * dinámico)" → "Ampliación 2026-09-29 (cuarta parte)"); la tarjeta del
+ * Diálogo Táctico ya se filtra sola dentro de `TacticalModuleOption`.
  */
 export default function InventoryModule() {
+  const { adminUser } = useAuth()
   const [params, setParams] = useSearchParams()
   const view = params.get('view')
+  const denied = view ? isViewDenied(adminUser, 'inventory', view) : false
 
   function goTo(next: string | null) {
     if (next) setParams({ view: next })
@@ -32,7 +41,11 @@ export default function InventoryModule() {
           >
             ← Volver a Inventory
           </button>
-          {view === TACTICAL_VIEW ? <TacticalCaptureView moduleId="inventory" /> : null}
+          {denied ? (
+            <p className="text-sm text-white/55">Tu nivel de acceso no tiene esta pantalla habilitada.</p>
+          ) : view === TACTICAL_VIEW ? (
+            <TacticalCaptureView moduleId="inventory" />
+          ) : null}
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">

@@ -68,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .eq('access_level_id', user.access_level_id)
 
       const moduleAccess: Partial<Record<AccessDestination, ModulePermission>> = {}
-      const adminViewAccess: Partial<Record<string, ModulePermission>> = {}
+      const viewAccess: Partial<Record<AccessDestination, Partial<Record<string, ModulePermission>>>> = {}
 
       for (const row of rows ?? []) {
         const mod = row.module as AccessDestination
@@ -77,15 +77,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (!current || PERMISSION_RANK[permission] > PERMISSION_RANK[current]) {
           moduleAccess[mod] = permission
         }
-        // 'all' es el valor por defecto (módulo completo) — no es una
-        // pantalla real, así que no entra al desglose por pantalla.
-        if (mod === 'admin' && row.view !== 'all') {
-          adminViewAccess[row.view] = permission
+        // 'all' es el valor por defecto (módulo/destino completo) — no es
+        // una pantalla real, así que no entra al desglose por pantalla
+        // (ampliado 2026-09-29: ahora para cualquiera de los 7 destinos, no
+        // solo 'admin').
+        if (row.view !== 'all') {
+          if (!viewAccess[mod]) viewAccess[mod] = {}
+          viewAccess[mod]![row.view] = permission
         }
       }
 
       user.moduleAccess = moduleAccess
-      user.adminViewAccess = adminViewAccess as AdminUser['adminViewAccess']
+      user.viewAccess = viewAccess
     }
 
     setAdminUser(user)

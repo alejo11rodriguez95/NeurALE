@@ -59,23 +59,6 @@ export type AccessLevel = 'admin' | 'gerencia' | 'jefe_area' | 'operador' | 'cus
 
 export type ModulePermission = 'ver' | 'editar'
 
-/**
- * Las 7 pantallas de Configuraciones y Administradores (agregado 2026-09-29 —
- * ver ARCHITECTURE.md → "Niveles de acceso (catálogo dinámico)" → "Granularidad
- * por pantalla"). Solo este módulo tiene desglose por pantalla en la matriz de
- * un nivel de acceso — los otros 6 destinos siguen siendo por módulo completo,
- * porque sus pantallas las define cada chat de módulo y todavía cambian
- * seguido (ver comentario en la migración `20260929090000_...`).
- */
-export type AdminView =
-  | 'ajustes'
-  | 'usuarios'
-  | 'niveles'
-  | 'empleados'
-  | 'puestos'
-  | 'muelles'
-  | 'sucursales'
-
 export type UserRole = ModuleRole | 'gerencia'
 
 /** Fila de `admin_users` tal como la usa el frontend (ver módulo Configuraciones y Administradores). */
@@ -102,10 +85,12 @@ export interface AdminUser {
    */
   moduleAccess?: Partial<Record<AccessDestination, ModulePermission>>
   /**
-   * Desglose por pantalla dentro de Configuraciones y Administradores, solo
-   * cuando el nivel tiene filas específicas de pantalla (no una fila "todas
-   * las pantallas") en su matriz para `module: 'admin'`. Vacío = el nivel no
-   * usa desglose por pantalla (ve todo o nada de `moduleAccess.admin`).
+   * Desglose por pantalla DENTRO de un destino (ampliado 2026-09-29 — antes
+   * solo existía para `admin`, ver ARCHITECTURE.md → "Niveles de acceso
+   * (catálogo dinámico)" → "Granularidad por pantalla en todos los módulos").
+   * Solo trae un destino como llave cuando el nivel tiene filas específicas
+   * de pantalla para ese destino (no una fila "todas las opciones") — si un
+   * destino no aparece acá, su acceso es todo-o-nada por `moduleAccess`.
    */
-  adminViewAccess?: Partial<Record<AdminView, ModulePermission>>
+  viewAccess?: Partial<Record<AccessDestination, Partial<Record<string, ModulePermission>>>>
 }
