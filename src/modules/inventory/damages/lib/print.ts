@@ -111,12 +111,16 @@ function batchMeta(d: BatchDetail, extra: [string, string][] = []): string {
 }
 
 function deptBlock(g: DepartmentMishandling): string {
-  const to = g.emails.length ? esc(g.emails.join(', ')) : 'sin correos configurados'
-  const mail = g.notice?.emailed_at
-    ? ` · notificado a ${to} (correo abierto ${esc(formatDateTimeSV(g.notice.emailed_at))})`
-    : ` · correo pendiente (${to})`
-  return `<div class="dept"><b>${esc(g.origin_name)}</b> · ${g.reports.length} avería(s) con mal manejo${mail}
+  const to = g.emails.length ? `jefe(s): ${esc(g.emails.join(', '))}` : 'sin correo de jefe configurado'
+  return `<div class="dept"><b>${esc(g.origin_name)}</b> · ${g.reports.length} avería(s) con mal manejo · ${to}
   <div class="box" style="margin-top:4px">${g.notice?.note ? nl2br(g.notice.note) : '<span style="color:#9ca3af">Sin observación de seguimiento.</span>'}</div></div>`
+}
+
+function emailStatus(d: BatchDetail): string {
+  const b = d.batch
+  if (!b.emailed_at) return 'Correo de seguimiento pendiente.'
+  const cc = b.emailed_cc.length ? ` · CC: ${b.emailed_cc.join(', ')}` : ''
+  return `Correo de seguimiento abierto ${formatDateTimeSV(b.emailed_at)} · Para: ${b.emailed_to.join(', ') || '—'}${cc}`
 }
 
 const signatures = `<div class="sign"><div>Elaboró (Inventory)</div><div>Revisó</div><div>Autorizó</div></div>`
@@ -138,7 +142,7 @@ export function printBatchReport(d: BatchDetail): void {
     <h2>Detalle de averías</h2>
     ${reportsTable(d)}
     <h2>Mal manejo por departamento</h2>
-    ${groups.length ? groups.map(deptBlock).join('') : '<div class="box">Todas las averías cumplieron las políticas de manejo.</div>'}
+    ${groups.length ? `<div style="color:#4b5563;margin-bottom:6px">${esc(emailStatus(d))}</div>${groups.map(deptBlock).join('')}` : '<div class="box">Todas las averías cumplieron las políticas de manejo.</div>'}
     <h2>Observación final de Inventory</h2>
     <div class="box">${d.batch.final_note ? nl2br(d.batch.final_note) : '<span style="color:#9ca3af">Sin observación.</span>'}</div>
     ${signatures}
@@ -178,35 +182,46 @@ export function printQrSheet(qrDataUrl: string, url: string): void {
   openPrintWindow('QR · Reporte de averías', body)
 }
 
-/* ---------- Correo de seguimiento ---------- */
+/* ---------- Correo de seguimiento (uno solo por lote) ---------- */
 
-export function mishandlingEmail(d: BatchDetail, g: DepartmentMishandling, note: string): { subject: string; body: string } {
-  const subject = `Mal manejo de averías · ${g.origin_name} · ${batchFolio(d.batch.folio)}`
-  const lines = g.reports.map(
-    ({ report: r, failed }) =>
-      `• ${reportFolio(r.folio)} · SKU ${r.sku} · ${r.quantity} u. · reportó ${r.reporter_name} (${formatDateTimeSV(r.created_at)})\n   No cumplió: ${failed.join(', ')}`,
-  )
+/**
+ * Correo único del lote: el detalle de mal manejo va separado por área. Los
+ * jefes de las áreas involucradas van en copia (CC) — ver `involvedCc`.
+ */
+export function batchMishandlingEmail(d: BatchDetail, groups: DepartmentMishandling[], notes: Record<string, string>): { subject: string; body: string } {
+  const total = groups.reduce((s, g) => s + g.reports.length, 0)
+  const areas = groups.map((g) => g.origin_name).join(', ')
+  const subject = `Mal manejo de averías · ${batchFolio(d.batch.folio)} · ${areas}`
+  const sections = groups.map((g) => {
+    const lines = g.reports.map(
+      ({ report: r, failed }) =>
+        `• ${reportFolio(r.folio)} · SKU ${r.sku} · ${r.quantity} u. · reportó ${r.reporter_name} (${formatDateTimeSV(r.created_at)})\n   No cumplió: ${failed.join(', ')}`,
+    )
+    const note = (notes[g.origin_id] ?? g.notice?.note ?? '').trim()
+    return [`■ ${g.origin_name.toUpperCase()} — ${g.reports.length} avería(s)`, ...lines, note ? `   Seguimiento: ${note}` : ''].filter(Boolean).join('\n')
+  })
   const body = [
     'Buen día,',
     '',
-    `Al trabajar las averías del lote ${batchFolio(d.batch.folio)}, Inventory detectó ${g.reports.length} avería(s) de ${g.origin_name} que no cumplieron las políticas de manejo:`,
+    `Al trabajar las averías del lote ${batchFolio(d.batch.folio)}, Inventory detectó ${total} avería(s) que no cumplieron las políticas de manejo. Detalle por área:`,
     '',
-    ...lines,
+    sections.join('\n\n'),
     '',
-    note.trim() ? `Seguimiento:\n${note.trim()}` : '',
-    '',
-    'Se adjunta el reporte del departamento. Agradecemos reforzar las políticas de manejo de averías con el equipo.',
+    'Se adjunta el reporte del lote. Agradecemos a cada jefe de área reforzar las políticas de manejo de averías con su equipo.',
     '',
     `Saludos,\n${d.batch.worked_by_name || 'Inventory'}\nInventory · CD NNEO`,
-  ]
-    .filter((l, i, arr) => !(l === '' && arr[i - 1] === ''))
-    .join('\n')
+  ].join('\n')
   return { subject, body }
 }
 
-/** mailto: armado. Outlook lo abre con destinatarios, asunto y cuerpo listos. */
-export function mailtoHref(emails: string[], subject: string, body: string): string {
-  return `mailto:${emails.map(encodeURIComponent).join(';')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body.replace(/\n/g, '\r\n'))}`
+/** mailto: armado (Para + CC). Outlook lo abre con destinatarios, asunto y cuerpo listos. */
+export function mailtoHref(to: string[], cc: string[], subject: string, body: string): string {
+  const params = [
+    cc.length ? `cc=${cc.map(encodeURIComponent).join(';')}` : '',
+    `subject=${encodeURIComponent(subject)}`,
+    `body=${encodeURIComponent(body.replace(/\n/g, '\r\n'))}`,
+  ].filter(Boolean)
+  return `mailto:${to.map(encodeURIComponent).join(';')}?${params.join('&')}`
 }
 
 /** Algunos clientes de correo cortan un mailto: muy largo (~2000 caracteres). */

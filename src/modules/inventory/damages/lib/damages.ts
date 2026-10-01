@@ -96,6 +96,10 @@ export interface DamageBatch {
   final_note: string | null
   erp_adjustment_ref: string | null
   closed_at: string | null
+  /** Correo único de seguimiento del lote (v2): cuándo se abrió y a quién. */
+  emailed_at: string | null
+  emailed_to: string[]
+  emailed_cc: string[]
 }
 
 export interface DamageFinding {
@@ -129,6 +133,8 @@ export interface BatchDetail {
   notices: DamageNotice[]
   policies: DamagePolicy[]
   origins: DamageOrigin[]
+  /** Destinatario(s) principal(es) del correo (Ajustes). Vacío si el usuario no puede leer Ajustes. */
+  mailTo: string[]
 }
 
 /* ---------- Utilidades ---------- */
@@ -148,7 +154,8 @@ async function rpc<T = unknown>(fn: string, args: Record<string, unknown> = {}):
 
 const REPORT_COLS =
   'id, folio, created_at, reporter_employee_id, reporter_code, reporter_name, origin_id, origin_name, sku, quantity, deducted_from_location, observation, status, batch_id'
-const BATCH_COLS = 'id, folio, created_at, worked_by_name, status, final_note, erp_adjustment_ref, closed_at'
+const BATCH_COLS =
+  'id, folio, created_at, worked_by_name, status, final_note, erp_adjustment_ref, closed_at, emailed_at, emailed_to, emailed_cc'
 
 /* ---------- Formulario público (QR, sin sesión) ---------- */
 
@@ -259,6 +266,17 @@ export async function fetchQrToken(): Promise<string | null> {
   return (data?.qr_token as string | undefined) ?? null
 }
 
+/** Destinatario(s) principal(es) del correo de seguimiento (campo "Para"). */
+export async function fetchMailTo(): Promise<string[]> {
+  const { data, error } = await supabase.from(DAMAGE_TABLES.settings).select('mail_to').eq('id', 1).maybeSingle()
+  fail(error)
+  return (data?.mail_to as string[] | undefined) ?? []
+}
+
+export async function saveMailTo(emails: string[]): Promise<void> {
+  await rpc('inventory_damage_settings_save', { p_mail_to: emails })
+}
+
 export async function regenerateQrToken(): Promise<string> {
   return rpc<string>('inventory_damage_regenerate_qr')
 }
@@ -328,13 +346,14 @@ export async function fetchBatches(): Promise<BatchSummary[]> {
 }
 
 export async function fetchBatchDetail(batchId: string): Promise<BatchDetail> {
-  const [b, r, f, n, policies, origins] = await Promise.all([
+  const [b, r, f, n, policies, origins, mailTo] = await Promise.all([
     supabase.from(DAMAGE_TABLES.batches).select(BATCH_COLS).eq('id', batchId).maybeSingle(),
     supabase.from(DAMAGE_TABLES.reports).select(REPORT_COLS).eq('batch_id', batchId).order('origin_name').order('folio'),
     supabase.from(DAMAGE_TABLES.findings).select('id, batch_id, report_id, policy_id, policy_label').eq('batch_id', batchId),
     supabase.from(DAMAGE_TABLES.notices).select('id, batch_id, origin_id, origin_name, emails, note, emailed_at').eq('batch_id', batchId),
     fetchPolicies(true),
     fetchOrigins(true),
+    fetchMailTo().catch(() => [] as string[]),
   ])
   fail(b.error)
   fail(r.error)
@@ -348,6 +367,7 @@ export async function fetchBatchDetail(batchId: string): Promise<BatchDetail> {
     notices: (n.data ?? []) as DamageNotice[],
     policies,
     origins,
+    mailTo,
   }
 }
 
@@ -355,8 +375,14 @@ export async function setFinding(reportId: string, policyId: string, failed: boo
   await rpc('inventory_damage_set_finding', { p_report_id: reportId, p_policy_id: policyId, p_failed: failed })
 }
 
-export async function saveNotice(batchId: string, originId: string, note: string, emailed: boolean): Promise<void> {
-  await rpc('inventory_damage_save_notice', { p_batch_id: batchId, p_origin_id: originId, p_note: note, p_emailed: emailed })
+/** Observación de seguimiento de un área con mal manejo (va en el correo y en los reportes). */
+export async function saveNotice(batchId: string, originId: string, note: string): Promise<void> {
+  await rpc('inventory_damage_save_notice', { p_batch_id: batchId, p_origin_id: originId, p_note: note, p_emailed: false })
+}
+
+/** Registra que se abrió el correo único de seguimiento del lote (Para + CC usados). */
+export async function markBatchEmailed(batchId: string, to: string[], cc: string[]): Promise<void> {
+  await rpc('inventory_damage_batch_mark_emailed', { p_batch_id: batchId, p_to: to, p_cc: cc })
 }
 
 export async function saveBatch(batchId: string, finalNote: string, erpRef: string): Promise<void> {
@@ -400,7 +426,7 @@ export function mishandlingByDepartment(d: BatchDetail): DepartmentMishandling[]
       g = {
         origin_id: r.origin_id,
         origin_name: origin?.name ?? r.origin_name,
-        emails: notice?.emailed_at ? notice.emails : (origin?.emails ?? []),
+        emails: origin?.emails ?? [],
         reports: [],
         notice,
       }
@@ -409,6 +435,21 @@ export function mishandlingByDepartment(d: BatchDetail): DepartmentMishandling[]
     g.reports.push({ report: r, failed })
   }
   return [...groups.values()].sort((a, b) => a.origin_name.localeCompare(b.origin_name))
+}
+
+/** Jefes de las áreas involucradas en el mal manejo (CC del correo), sin repetir ni duplicar el "Para". */
+export function involvedCc(groups: DepartmentMishandling[], to: string[]): string[] {
+  const skip = new Set(to.map((x) => x.toLowerCase()))
+  const out: string[] = []
+  for (const g of groups)
+    for (const e of g.emails) {
+      const k = e.toLowerCase()
+      if (!skip.has(k)) {
+        skip.add(k)
+        out.push(e)
+      }
+    }
+  return out
 }
 
 /* ---------- Tiempo real ---------- */

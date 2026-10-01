@@ -10,6 +10,8 @@ import {
   cancelBatch,
   closeBatch,
   fetchBatchDetail,
+  involvedCc,
+  markBatchEmailed,
   mishandlingByDepartment,
   reportFolio,
   saveBatch,
@@ -20,7 +22,7 @@ import {
   type DamageReport,
   type DepartmentMishandling,
 } from './lib/damages'
-import { MAILTO_SAFE_LENGTH, mailtoHref, mishandlingEmail, printBatchReport, printDepartmentReport } from './lib/print'
+import { MAILTO_SAFE_LENGTH, batchMishandlingEmail, mailtoHref, printBatchReport, printDepartmentReport } from './lib/print'
 import {
   COLOR,
   ErrorText,
@@ -204,7 +206,7 @@ function PolicyReview({
   )
 }
 
-/* ---------- 2. Mal manejo por departamento ---------- */
+/* ---------- 2. Mal manejo por área + correo único ---------- */
 
 function Departments({
   d,
@@ -218,19 +220,44 @@ function Departments({
   onChanged: () => void
 }) {
   const groups = mishandlingByDepartment(d)
+  // Observación por área (borrador local; se guarda al salir del campo).
+  const [notes, setNotes] = useState<Record<string, string>>({})
+  const noteOf = (g: DepartmentMishandling) => notes[g.origin_id] ?? g.notice?.note ?? ''
+
   return (
     <section className="space-y-3">
       <div>
-        <h3 className="font-display text-base font-semibold text-white">2 · Mal manejo por departamento</h3>
+        <h3 className="font-display text-base font-semibold text-white">2 · Mal manejo por área y correo de seguimiento</h3>
         <p className="mt-1 text-sm text-white/50">
-          Cada departamento con mal manejo lleva su reporte y su correo de seguimiento. No se puede confirmar el lote sin
-          abrir el correo de cada uno.
+          Se envía <b>un solo correo</b> con el detalle de cada área, con copia a los jefes de las áreas involucradas. No se puede
+          confirmar el lote sin abrir ese correo.
         </p>
       </div>
       {groups.length === 0 ? (
-        <GlassCard className="p-4 text-sm text-white/60">Todas las averías cumplen las políticas. No hay correos que enviar.</GlassCard>
+        <GlassCard className="p-4 text-sm text-white/60">Todas las averías cumplen las políticas. No hay correo que enviar.</GlassCard>
       ) : (
-        groups.map((g) => <DepartmentCard key={g.origin_id} d={d} g={g} editable={editable} onError={onError} onChanged={onChanged} />)
+        <>
+          {groups.map((g) => (
+            <DepartmentCard
+              key={g.origin_id}
+              d={d}
+              g={g}
+              note={noteOf(g)}
+              onNote={(v) => setNotes((prev) => ({ ...prev, [g.origin_id]: v }))}
+              editable={editable}
+              onError={onError}
+              onChanged={onChanged}
+            />
+          ))}
+          <BatchEmailCard
+            d={d}
+            groups={groups}
+            notes={Object.fromEntries(groups.map((g) => [g.origin_id, noteOf(g)]))}
+            editable={editable}
+            onError={onError}
+            onChanged={onChanged}
+          />
+        </>
       )}
     </section>
   )
@@ -239,55 +266,30 @@ function Departments({
 function DepartmentCard({
   d,
   g,
+  note,
+  onNote,
   editable,
   onError,
   onChanged,
 }: {
   d: BatchDetail
   g: DepartmentMishandling
+  note: string
+  onNote: (v: string) => void
   editable: boolean
   onError: (m: string | null) => void
   onChanged: () => void
 }) {
-  const [note, setNote] = useState(g.notice?.note ?? '')
-  const [busy, setBusy] = useState(false)
-  const [copied, setCopied] = useState(false)
   const ring = ringStyle(COLOR)
   const saved = g.notice?.note ?? ''
 
-  useEffect(() => setNote(g.notice?.note ?? ''), [g.notice?.note])
-
-  const mail = mishandlingEmail(d, g, note)
-  const href = mailtoHref(g.emails, mail.subject, mail.body)
-  const tooLong = href.length > MAILTO_SAFE_LENGTH
-
-  async function persist(emailed: boolean) {
-    setBusy(true)
+  async function persist() {
     onError(null)
     try {
-      await saveNotice(d.batch.id, g.origin_id, note, emailed)
+      await saveNotice(d.batch.id, g.origin_id, note)
       onChanged()
-      return true
     } catch (e) {
       onError(errMsg(e))
-      return false
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function openMail() {
-    if (!(await persist(true))) return
-    window.location.href = tooLong ? mailtoHref(g.emails, mail.subject, `${mail.body.slice(0, 900)}\n\n[…] Detalle completo en el reporte adjunto.`) : href
-  }
-
-  async function copyBody() {
-    try {
-      await navigator.clipboard.writeText(`${mail.subject}\n\n${mail.body}`)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      onError('No se pudo copiar al portapapeles.')
     }
   }
 
@@ -302,25 +304,15 @@ function DepartmentCard({
 
   return (
     <GlassCard className="space-y-3 p-5" style={{ borderColor: withAlpha(MISHANDLING_COLOR, 0.35) }}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h4 className="font-display text-base font-semibold text-white">{g.origin_name}</h4>
-          <p className="text-sm text-white/55">
-            {g.reports.length} avería(s) con mal manejo · {g.reports.reduce((s, x) => s + x.report.quantity, 0)} unidades
-          </p>
-          <p className="mt-1 text-xs text-white/45">
-            Para: {g.emails.length ? g.emails.join(', ') : <span style={{ color: '#fbbf24' }}>sin correos configurados (QR y ajustes → Departamentos)</span>}
-          </p>
-        </div>
-        {g.notice?.emailed_at ? (
-          <span className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold" style={{ background: withAlpha('#34d399', 0.15), color: '#34d399' }}>
-            Correo abierto · {formatDateTimeSV(g.notice.emailed_at)}
-          </span>
-        ) : (
-          <span className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold" style={{ background: withAlpha('#fbbf24', 0.15), color: '#fbbf24' }}>
-            Correo pendiente
-          </span>
-        )}
+      <div>
+        <h4 className="font-display text-base font-semibold text-white">{g.origin_name}</h4>
+        <p className="text-sm text-white/55">
+          {g.reports.length} avería(s) con mal manejo · {g.reports.reduce((s, x) => s + x.report.quantity, 0)} unidades
+        </p>
+        <p className="mt-1 text-xs text-white/45">
+          Jefe(s) en copia:{' '}
+          {g.emails.length ? g.emails.join(', ') : <span style={{ color: '#fbbf24' }}>sin correo configurado (QR y ajustes → Departamentos)</span>}
+        </p>
       </div>
 
       <ul className="space-y-1 text-sm">
@@ -333,24 +325,122 @@ function DepartmentCard({
       </ul>
 
       <label className="block">
-        <span className={fieldLabelClass}>Observación de seguimiento para {g.origin_name} (va en el reporte y en el correo)</span>
+        <span className={fieldLabelClass}>Observación de seguimiento para {g.origin_name} (va en el correo y en el reporte)</span>
         <textarea
           className={fieldControlClass}
           style={ring}
           rows={2}
           disabled={!editable}
           value={note}
-          onChange={(e) => setNote(e.target.value)}
-          onBlur={() => editable && note !== saved && persist(false)}
+          onChange={(e) => onNote(e.target.value)}
+          onBlur={() => editable && note !== saved && persist()}
         />
       </label>
 
+      <GhostButton onClick={print}>Imprimir reporte de {g.origin_name}</GhostButton>
+    </GlassCard>
+  )
+}
+
+/** Correo único del lote: Para = destinatario principal (Ajustes); CC = jefes de las áreas involucradas. */
+function BatchEmailCard({
+  d,
+  groups,
+  notes,
+  editable,
+  onError,
+  onChanged,
+}: {
+  d: BatchDetail
+  groups: DepartmentMishandling[]
+  notes: Record<string, string>
+  editable: boolean
+  onError: (m: string | null) => void
+  onChanged: () => void
+}) {
+  const [busy, setBusy] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const to = d.mailTo
+  const cc = involvedCc(groups, to)
+  const missingBoss = groups.filter((g) => g.emails.length === 0).map((g) => g.origin_name)
+  const mail = batchMishandlingEmail(d, groups, notes)
+  const href = mailtoHref(to, cc, mail.subject, mail.body)
+  const tooLong = href.length > MAILTO_SAFE_LENGTH
+  const emailedAt = d.batch.emailed_at
+
+  async function openMail() {
+    setBusy(true)
+    onError(null)
+    try {
+      // Guarda primero las observaciones por área que sigan en borrador.
+      for (const g of groups) {
+        const n = notes[g.origin_id] ?? ''
+        if (n !== (g.notice?.note ?? '')) await saveNotice(d.batch.id, g.origin_id, n)
+      }
+      await markBatchEmailed(d.batch.id, to, cc)
+      onChanged()
+      window.location.href = tooLong
+        ? mailtoHref(to, cc, mail.subject, `${mail.body.slice(0, 900)}\n\n[…] Detalle completo por área en el reporte adjunto.`)
+        : href
+    } catch (e) {
+      onError(errMsg(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function copyBody() {
+    try {
+      await navigator.clipboard.writeText(`${mail.subject}\n\n${mail.body}`)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      onError('No se pudo copiar al portapapeles.')
+    }
+  }
+
+  return (
+    <GlassCard className="space-y-3 p-5" style={{ borderColor: withAlpha(COLOR, 0.45) }}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h4 className="font-display text-base font-semibold text-white">Correo de seguimiento del lote</h4>
+          <p className="text-sm text-white/55">
+            Un solo correo con {groups.length} área(s): {groups.map((g) => g.origin_name).join(', ')}.
+          </p>
+        </div>
+        {emailedAt ? (
+          <span className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold" style={{ background: withAlpha('#34d399', 0.15), color: '#34d399' }}>
+            Correo abierto · {formatDateTimeSV(emailedAt)}
+          </span>
+        ) : (
+          <span className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold" style={{ background: withAlpha('#fbbf24', 0.15), color: '#fbbf24' }}>
+            Correo pendiente
+          </span>
+        )}
+      </div>
+
+      <dl className="grid gap-1 text-sm sm:grid-cols-[4rem_1fr]">
+        <dt className="text-white/45">Para</dt>
+        <dd className="text-white/80">
+          {to.length ? to.join(', ') : <span className="text-white/45">(vacío — lo eliges en Outlook; se configura en QR y ajustes)</span>}
+        </dd>
+        <dt className="text-white/45">CC</dt>
+        <dd className="text-white/80">{cc.length ? cc.join(', ') : <span className="text-white/45">—</span>}</dd>
+        <dt className="text-white/45">Asunto</dt>
+        <dd className="text-white/80">{mail.subject}</dd>
+      </dl>
+
+      {missingBoss.length ? (
+        <p className="text-xs text-[#fbbf24]">
+          Sin correo de jefe configurado: {missingBoss.join(', ')}. Agrégalo en QR y ajustes → Departamentos, o cópialo a mano en Outlook.
+        </p>
+      ) : null}
+
       <div className="flex flex-wrap gap-2">
-        <GhostButton onClick={print}>Imprimir reporte del departamento</GhostButton>
         <GhostButton onClick={copyBody}>{copied ? 'Copiado ✓' : 'Copiar texto del correo'}</GhostButton>
         {editable ? (
           <PrimaryButton color={COLOR} disabled={busy} onClick={openMail}>
-            {g.notice?.emailed_at ? 'Abrir correo otra vez' : 'Abrir correo en Outlook'}
+            {emailedAt ? 'Abrir correo otra vez' : 'Abrir correo en Outlook'}
           </PrimaryButton>
         ) : null}
       </div>
@@ -359,7 +449,10 @@ function DepartmentCard({
           El detalle es largo para un correo armado: se abrirá resumido. Usa "Copiar texto del correo" para pegar el detalle completo.
         </p>
       ) : null}
-      <p className="text-xs text-white/40">Imprime el reporte como PDF y adjúntalo al correo antes de enviarlo.</p>
+      <p className="text-xs text-white/40">
+        Imprime el reporte del lote como PDF (sección 3) y adjúntalo antes de enviar. Si cambias alguna política después de abrir el
+        correo, hay que volver a abrirlo.
+      </p>
     </GlassCard>
   )
 }
@@ -392,7 +485,7 @@ function FinalSection({
   }, [d.batch.final_note, d.batch.erp_adjustment_ref])
 
   const dirty = note !== (d.batch.final_note ?? '') || erp !== (d.batch.erp_adjustment_ref ?? '')
-  const pendingMail = mishandlingByDepartment(d).filter((g) => !g.notice?.emailed_at)
+  const pendingMail = mishandlingByDepartment(d).length > 0 && !d.batch.emailed_at
 
   async function save() {
     setBusy(true)
@@ -469,8 +562,8 @@ function FinalSection({
             </>
           ) : null}
         </div>
-        {editable && pendingMail.length ? (
-          <p className="text-xs text-[#fbbf24]">Falta abrir el correo de: {pendingMail.map((g) => g.origin_name).join(', ')}.</p>
+        {editable && pendingMail ? (
+          <p className="text-xs text-[#fbbf24]">Falta abrir el correo de seguimiento por mal manejo (sección 2).</p>
         ) : null}
       </GlassCard>
 

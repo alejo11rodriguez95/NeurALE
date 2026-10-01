@@ -8,9 +8,11 @@ import {
   deletePolicy,
   fetchOrigins,
   fetchPolicies,
+  fetchMailTo,
   fetchQrToken,
   publicFormUrl,
   regenerateQrToken,
+  saveMailTo,
   saveOrigin,
   savePolicy,
   type DamageOrigin,
@@ -34,6 +36,7 @@ export function DamageSettingsView() {
   return (
     <div className="space-y-8">
       <QrSection />
+      <MailToSection />
       <OriginsSection />
       <PoliciesSection />
     </div>
@@ -152,6 +155,72 @@ function QrSection() {
   )
 }
 
+/* ---------- Destinatario principal del correo ---------- */
+
+function MailToSection() {
+  const [value, setValue] = useState('')
+  const [saved, setSaved] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [ok, setOk] = useState(false)
+  const ring = ringStyle(COLOR)
+
+  useEffect(() => {
+    fetchMailTo()
+      .then((v) => {
+        setValue(v.join(', '))
+        setSaved(v.join(', '))
+      })
+      .catch((e) => setError(errMsg(e)))
+  }, [])
+
+  async function save() {
+    setBusy(true)
+    setError(null)
+    try {
+      const list = value.split(/[,;\s]+/).filter(Boolean)
+      await saveMailTo(list)
+      const norm = list.map((x) => x.toLowerCase()).join(', ')
+      setValue(norm)
+      setSaved(norm)
+      setOk(true)
+      setTimeout(() => setOk(false), 2000)
+    } catch (e) {
+      setError(errMsg(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <section className="space-y-3">
+      <div>
+        <h3 className="font-display text-base font-semibold text-white">Correo de seguimiento por mal manejo</h3>
+        <p className="mt-1 text-sm text-white/50">
+          Cada lote genera un solo correo. <b>Para</b>: estos destinatarios (por ejemplo, gerencia del CD). <b>CC</b>: los jefes
+          de las áreas involucradas, según los correos de cada departamento de abajo.
+        </p>
+      </div>
+      <GlassCard className="space-y-3 p-5">
+        <label className="block">
+          <span className={fieldLabelClass}>Para (separados por coma; opcional)</span>
+          <input
+            className={fieldControlClass}
+            style={ring}
+            value={value}
+            placeholder="gerente.cd@vidri.com.sv"
+            onChange={(e) => setValue(e.target.value)}
+          />
+        </label>
+        <ErrorText>{error}</ErrorText>
+        <PrimaryButton color={COLOR} disabled={busy || saved === null || value === saved} onClick={save}>
+          {ok ? 'Guardado ✓' : 'Guardar'}
+        </PrimaryButton>
+      </GlassCard>
+    </section>
+  )
+}
+
 /* ---------- Departamentos (origen) ---------- */
 
 function OriginsSection() {
@@ -171,7 +240,7 @@ function OriginsSection() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h3 className="font-display text-base font-semibold text-white">Departamentos (origen de la avería)</h3>
-          <p className="mt-1 text-sm text-white/50">Salen en el formulario del QR. Los correos reciben el seguimiento por mal manejo.</p>
+          <p className="mt-1 text-sm text-white/50">Salen en el formulario del QR. Los correos de cada uno (sus jefes) van en copia del correo de mal manejo cuando el área está involucrada.</p>
         </div>
         <PrimaryButton color={COLOR} onClick={() => setEditing({ name: '', emails: [], sort_order: (rows?.length ?? 0) + 1, active: true })}>
           + Agregar departamento
@@ -263,7 +332,7 @@ function OriginModal({ value, onClose, onSaved }: { value: Partial<DamageOrigin>
         <input className={fieldControlClass} style={ring} value={name} onChange={(e) => setName(e.target.value)} />
       </label>
       <label className="block">
-        <span className={fieldLabelClass}>Correos del responsable (separados por coma)</span>
+        <span className={fieldLabelClass}>Correos de los jefes del área (van en CC; separados por coma)</span>
         <textarea className={fieldControlClass} style={ring} rows={2} value={emails} onChange={(e) => setEmails(e.target.value)} placeholder="jefe.picking@vidri.com.sv, coordinador@vidri.com.sv" />
       </label>
       <div className="flex items-end gap-4">
