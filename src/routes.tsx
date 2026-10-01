@@ -4,6 +4,7 @@ import AdminModule from '@/modules/admin'
 import DashboardModule from '@/modules/dashboard'
 import InboundModule from '@/modules/inbound'
 import InventoryModule from '@/modules/inventory'
+import PublicDamageForm from '@/modules/inventory/damages/PublicDamageForm'
 import OutboundModule from '@/modules/outbound'
 import PickingModule from '@/modules/picking'
 import StorageModule from '@/modules/storage'
@@ -34,6 +35,9 @@ export const router = createBrowserRouter([
     children: [
       { path: '/', element: <NucleoNeuronal /> },
       { path: '/login', element: <Login /> },
+      // Formulario público de Control de Averías (Inventory): lo abre el QR,
+      // no pide sesión — la base valida el token del QR y el código de empleado.
+      { path: '/averias', element: <PublicDamageForm /> },
       {
         path: '/inbound',
         element: (
