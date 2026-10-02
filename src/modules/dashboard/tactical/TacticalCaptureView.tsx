@@ -5,7 +5,16 @@ import { canManageModule } from '@/shared/auth/RequireAccess'
 import { GlassCard } from '@/shared/components/GlassCard'
 import { MODULES, type ModuleId } from '@/shared/modules'
 
-import { saveFillRateDaily, saveProcess, saveQuality, saveSafety, type FillRateDailyRow, type ProcessRow, type QualityRow } from './api'
+import {
+  saveFillRateDaily,
+  saveProcess,
+  saveQuality,
+  saveSafety,
+  setStorageCarryReset,
+  type FillRateDailyRow,
+  type ProcessRow,
+  type QualityRow,
+} from './api'
 import {
   SHORTAGE_CAUSES,
   currentShiftSV,
@@ -107,6 +116,10 @@ export function TacticalCaptureView({ moduleId }: { moduleId: ModuleId }) {
               color={color}
               onSave={async (v) => {
                 await saveProcess({ shift_date: date, shift, process_id: proc.id }, v)
+                reload()
+              }}
+              onCarryReset={async (discarded) => {
+                await setStorageCarryReset(date, shift, slotMode(settings.goals.shifts), discarded)
                 reload()
               }}
             />
@@ -259,6 +272,7 @@ function ProcessForm({
   isqMax = 0,
   color,
   onSave,
+  onCarryReset,
 }: {
   def: ProcessDef
   row: ProcessRow | undefined
@@ -275,8 +289,32 @@ function ProcessForm({
   isqMax?: number
   color: string
   onSave: (v: Partial<ProcessRow>) => Promise<void>
+  /** Storage: reiniciar el pendiente (pallets descartados) o deshacerlo (null). */
+  onCarryReset?: (discarded: number | null) => Promise<void>
 }) {
   const containers = !!def.containers
+  const [resetBusy, setResetBusy] = useState(false)
+  const [resetErr, setResetErr] = useState<string | null>(null)
+  async function carryReset(discarded: number | null) {
+    if (!onCarryReset) return
+    const slot = storageMode === 'shift' ? 'este turno' : 'este día'
+    const ok =
+      discarded !== null
+        ? window.confirm(
+            `¿Reiniciar el pendiente? Se descartan ${fmt(discarded)} pallets que venían del ${storageMode === 'shift' ? 'turno' : 'día'} anterior y ${slot} arranca solo con el plan de Inbound (${fmt(storage?.inboundPart ?? 0)} pallets). Úsalo cuando salieron menos pallets que el promedio por contenedor y ese pendiente en realidad no existe.`,
+          )
+        : window.confirm('¿Deshacer el reinicio? El pendiente anterior vuelve a sumarse al plan.')
+    if (!ok) return
+    setResetBusy(true)
+    setResetErr(null)
+    try {
+      await onCarryReset(discarded)
+    } catch (e) {
+      setResetErr(e instanceof Error ? e.message : String(e))
+    } finally {
+      setResetBusy(false)
+    }
+  }
   const autoStorage = !!def.autoStorage
   const perPersonHour = !!def.perPersonHour
   // El indicador de calidad solo se captura aquí si lo llena el propio módulo.
@@ -378,7 +416,18 @@ function ProcessForm({
               </span>
               <span>
                 Pendiente {storageMode === 'shift' ? 'del turno anterior' : 'del día anterior'}:{' '}
-                <b className="text-white">{fmt(storage.carry)}</b> pallets
+                {storage.reset ? (
+                  <>
+                    <b className="text-white">0</b> pallets{' '}
+                    <span className="text-amber-300">
+                      (reiniciado{storage.discarded ? ` · se descartaron ${fmt(storage.discarded)}` : ''})
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <b className="text-white">{fmt(storage.carry)}</b> pallets
+                  </>
+                )}
               </span>
               <span>
                 Plan: <b className="text-white">{fmt(storage.plan)}</b> pallets
@@ -392,6 +441,30 @@ function ProcessForm({
               Todavía no se puede calcular: falta correr la migración de Registro x Pallet o no hay datos de Inbound.
             </p>
           )}
+          {storage && onCarryReset && (storage.carry > 0 || storage.reset) ? (
+            <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-neurale-border pt-3">
+              {storage.reset ? (
+                <>
+                  <span className="text-xs text-white/55">
+                    Pendiente reiniciado: {storageMode === 'shift' ? 'este turno' : 'este día'} arranca solo con el plan de Inbound.
+                  </span>
+                  <Button onClick={() => carryReset(null)} disabled={resetBusy}>
+                    {resetBusy ? 'Guardando…' : 'Deshacer reinicio'}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <span className="text-xs text-white/55">
+                    ¿Ese pendiente ya no existe (salieron menos pallets que el promedio)?
+                  </span>
+                  <Button primary color={color} onClick={() => carryReset(storage.carry)} disabled={resetBusy}>
+                    {resetBusy ? 'Reiniciando…' : `Reiniciar pendiente (${fmt(storage.carry)} pallets)`}
+                  </Button>
+                </>
+              )}
+              {resetErr ? <span className="text-xs text-rose-300">Error: {resetErr}</span> : null}
+            </div>
+          ) : null}
           <p className="mt-2 text-xs text-white/40">
             El plan sale solo del plan de Inbound y los pallets reales, de Storage → Registro x Pallet. No se capturan aquí.
           </p>

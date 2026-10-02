@@ -178,22 +178,31 @@ export interface StorageSlot {
   plan: number
   /** Pallets del "Registro x Pallet" de la casilla. */
   real: number
+  /** Se reinició el pendiente en esta casilla (salieron menos pallets que el promedio). */
+  reset: boolean
+  /** Pendiente que se descartó al reiniciar (lo que hubiera arrastrado). */
+  discarded: number
 }
 
 /**
  * Encadena las casillas en orden: plan = % de Inbound + pendiente anterior;
  * pendiente = max(0, plan − real). `slots` debe venir en orden cronológico.
+ * Una casilla con `reset` descarta el pendiente anterior y arranca solo con
+ * su % de Inbound (Storage → Diálogo Táctico → "Reiniciar pendiente").
  */
 export function chainStorage(
-  slots: { key: string; inboundPallets: number; real: number }[],
+  slots: { key: string; inboundPallets: number; real: number; reset?: boolean }[],
   pctOfInbound: number,
 ): Map<string, StorageSlot> {
   const out = new Map<string, StorageSlot>()
   let carry = 0
   for (const s of slots) {
     const inboundPart = Math.round((s.inboundPallets * pctOfInbound) / 100)
+    const reset = !!s.reset
+    const discarded = reset ? carry : 0
+    if (reset) carry = 0
     const plan = inboundPart + carry
-    out.set(s.key, { inboundPart, carry, plan, real: s.real })
+    out.set(s.key, { inboundPart, carry, plan, real: s.real, reset, discarded })
     carry = Math.max(0, plan - s.real)
   }
   return out

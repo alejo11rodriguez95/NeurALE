@@ -57,6 +57,9 @@ export interface ProcessRow {
   errors: number | null
   /** Inbound (v7): dotación por puesto (Revisadores / Aux. de Descarga). */
   staff_breakdown?: StaffBreakdown | null
+  /** Storage: la casilla descarta el pendiente arrastrado (ver chainStorage). */
+  carry_reset_at?: string | null
+  carry_reset_pallets?: number | null
   updated_at?: string
 }
 
@@ -189,7 +192,7 @@ const STORAGE_LOOKBACK_DAYS = 30
 export async function fetchStorageSlots(from: string, to: string, goals: Goals): Promise<Map<string, StorageSlot> | null> {
   try {
     const start = addDays(from, -STORAGE_LOOKBACK_DAYS)
-    const [rec, recs] = await Promise.all([
+    const [rec, recs, resets] = await Promise.all([
       supabase
         .from(T.process)
         .select('shift_date, shift, vol_plan')
@@ -201,9 +204,17 @@ export async function fetchStorageSlots(from: string, to: string, goals: Goals):
         .select('recorded_at, pallets')
         .gte('record_date', start)
         .lte('record_date', addDays(to, 1)),
+      supabase
+        .from(T.process)
+        .select('shift_date, shift')
+        .eq('process_id', 'alm')
+        .not('carry_reset_at', 'is', null)
+        .gte('shift_date', start)
+        .lte('shift_date', to),
     ])
     fail(rec.error)
     fail(recs.error)
+    // Si la columna aún no existe (migración sin correr), se ignora el reinicio.
     const cfg = goals.shifts
     const mode = slotMode(cfg)
     const k = goals.g.palletsPerContainer
@@ -218,10 +229,15 @@ export async function fetchStorageSlots(from: string, to: string, goals: Goals):
       const key = slotKeyOf(r.recorded_at, cfg)
       real.set(key, (real.get(key) ?? 0) + Number(r.pallets))
     }
-    const slots: { key: string; inboundPallets: number; real: number }[] = []
+    const reset = new Set<string>()
+    for (const r of (resets.error ? [] : (resets.data ?? [])) as { shift_date: string; shift: ShiftId }[]) {
+      reset.add(mode === 'day' ? r.shift_date : `${r.shift_date}|${r.shift}`)
+    }
+    const slots: { key: string; inboundPallets: number; real: number; reset: boolean }[] = []
     for (let d = start; d <= to; d = addDays(d, 1)) {
       const keys = mode === 'day' ? [d] : [`${d}|A`, `${d}|B`]
-      for (const key of keys) slots.push({ key, inboundPallets: inbound.get(key) ?? 0, real: real.get(key) ?? 0 })
+      for (const key of keys)
+        slots.push({ key, inboundPallets: inbound.get(key) ?? 0, real: real.get(key) ?? 0, reset: reset.has(key) })
     }
     return chainStorage(slots, goals.g.storagePct)
   } catch {
@@ -340,6 +356,41 @@ export async function saveProcess(
   const { error } = await supabase
     .from(T.process)
     .upsert({ ...key, ...values }, { onConflict: 'shift_date,shift,process_id' })
+  fail(error)
+}
+
+/**
+ * Storage: reiniciar (o deshacer el reinicio de) el pendiente de una casilla.
+ * Reiniciar marca la fila de Storage del turno elegido; deshacer limpia la
+ * marca en TODAS las filas de Storage de esa casilla (en modo día, A y B).
+ */
+export async function setStorageCarryReset(
+  date: string,
+  shift: ShiftId,
+  mode: 'shift' | 'day',
+  discarded: number | null,
+) {
+  if (discarded !== null) {
+    const { error } = await supabase.from(T.process).upsert(
+      {
+        shift_date: date,
+        shift,
+        process_id: 'alm',
+        carry_reset_at: new Date().toISOString(),
+        carry_reset_pallets: Math.max(0, Math.round(discarded)),
+      },
+      { onConflict: 'shift_date,shift,process_id' },
+    )
+    fail(error)
+    return
+  }
+  let q = supabase
+    .from(T.process)
+    .update({ carry_reset_at: null, carry_reset_pallets: null })
+    .eq('process_id', 'alm')
+    .eq('shift_date', date)
+  if (mode === 'shift') q = q.eq('shift', shift)
+  const { error } = await q
   fail(error)
 }
 

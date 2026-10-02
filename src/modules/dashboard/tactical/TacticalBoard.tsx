@@ -677,7 +677,7 @@ function Matrix({ board, dense }: { board: Board; dense?: boolean }) {
                   value={r.volPct === null ? '—' : <>{fmt(r.volPct)}<span className="text-[0.55em] text-white/45">%</span></>}
                   meta={
                     r.storage
-                      ? `${fmt(r.volReal)} / ${fmt(r.volPlan)} pallets${r.storage.carry ? ` · +${fmt(r.storage.carry)} pendiente` : ''}`
+                      ? `${fmt(r.volReal)} / ${fmt(r.volPlan)} pallets${r.storage.reset ? ' · pendiente reiniciado' : r.storage.carry ? ` · +${fmt(r.storage.carry)} pendiente` : ''}`
                       : 'Sin dato'
                   }
                 />
