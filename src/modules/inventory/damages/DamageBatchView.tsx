@@ -6,6 +6,7 @@ import { withAlpha } from '@/shared/modules'
 
 import {
   MISHANDLING_COLOR,
+  NOT_DEDUCTED_LABEL,
   batchFolio,
   cancelBatch,
   closeBatch,
@@ -142,7 +143,7 @@ function PolicyReview({
         <h3 className="font-display text-base font-semibold text-white">1 · Revisión de políticas de manejo</h3>
         <p className="mt-1 text-sm text-white/50">
           {editable
-            ? 'Toca una política para marcarla como NO cumplida en ese SKU. Si el colaborador reportó que no se descontó de la ubicación, ya viene marcada.'
+            ? 'Toca una política para marcarla como NO cumplida en ese SKU. Si el colaborador no marcó que se descontó de la ubicación, ya viene marcada.'
             : 'Políticas no cumplidas por SKU.'}
         </p>
       </div>
@@ -168,8 +169,8 @@ function PolicyReview({
                     </span>
                   ) : null}
                   <span className="block text-xs text-white/45">
-                    {reportFolio(r.folio)} · {r.reporter_name} · {formatDateTimeSV(r.created_at)} · ¿descontada?{' '}
-                    {r.deducted_from_location ? 'Sí' : 'No'}
+                    {reportFolio(r.folio)} · {r.reporter_name} · {formatDateTimeSV(r.created_at)} ·{' '}
+                    {r.deducted_from_location ? 'Descontada de la ubicación' : NOT_DEDUCTED_LABEL}
                   </span>
                   <span className="mt-1 block text-white/60">“{r.observation}”</span>
                 </div>

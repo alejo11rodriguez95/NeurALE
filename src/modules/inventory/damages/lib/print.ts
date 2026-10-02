@@ -1,6 +1,7 @@
 import { formatDateTimeSV } from '@/modules/storage/isq/lib/isq'
 
 import {
+  NOT_DEDUCTED_LABEL,
   batchFolio,
   mishandlingByDepartment,
   reportFolio,
@@ -87,7 +88,7 @@ function reportsTable(d: BatchDetail, onlyIds?: Set<string>): string {
         <td>${esc(r.origin_name)}</td>
         <td><b>${esc(r.sku)}</b></td>
         <td class="num">${esc(r.quantity)}</td>
-        <td>${r.deducted_from_location ? '<span class="ok-txt">Sí</span>' : '<span class="bad-txt">No</span>'}</td>
+        <td>${r.deducted_from_location ? '<span class="ok-txt">Sí</span>' : `<span class="bad-txt">${NOT_DEDUCTED_LABEL}</span>`}</td>
         <td>${nl2br(r.observation)}</td>
         <td>${f.length ? `<span class="bad-txt">${f.map(esc).join('<br>')}</span>` : '<span class="ok-txt">Cumple</span>'}</td>
       </tr>`

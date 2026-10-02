@@ -135,26 +135,31 @@ export function ErrorText({ children }: { children: ReactNode }) {
   return children ? <p className="text-sm text-[#f87171]">{children}</p> : null
 }
 
-/** Sí / No obligatorio (sin valor por defecto, para que el colaborador lo elija). */
-export function YesNo({ value, onChange }: { value: boolean | null; onChange: (v: boolean) => void }) {
-  const opt = (v: boolean, label: string, c: string) => (
+/**
+ * Un solo botón "Sí, se descontó". Si el colaborador no lo marca, el reporte
+ * queda como "No se marcó como descontado" (pedido de Josué 2026-10-02).
+ */
+export function DeductedToggle({ value, onChange }: { value: boolean; onChange: (v: boolean) => void }) {
+  const c = '#34d399'
+  return (
     <button
       type="button"
-      onClick={() => onChange(v)}
-      className="flex-1 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors"
+      aria-pressed={value}
+      onClick={() => onChange(!value)}
+      className="mt-1.5 flex w-full items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-medium transition-colors"
       style={
-        value === v
+        value
           ? { background: withAlpha(c, 0.18), borderColor: c, color: c }
           : { borderColor: 'var(--color-neurale-border)', color: 'rgba(255,255,255,0.65)' }
       }
     >
-      {label}
+      <span
+        className="flex h-4 w-4 items-center justify-center rounded border text-[11px]"
+        style={{ borderColor: value ? c : 'rgba(255,255,255,0.4)' }}
+      >
+        {value ? '✓' : ''}
+      </span>
+      Sí, se descontó
     </button>
-  )
-  return (
-    <div className="mt-1.5 flex gap-2">
-      {opt(true, 'Sí, se descontó', '#34d399')}
-      {opt(false, 'No se descontó', '#f87171')}
-    </div>
   )
 }

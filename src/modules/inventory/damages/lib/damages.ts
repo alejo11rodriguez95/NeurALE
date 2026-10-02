@@ -50,6 +50,9 @@ export const DAMAGE_STATUS_COLORS: Record<DamageStatus, string> = {
   actualizado: '#34d399',
 }
 
+/** Texto cuando el colaborador NO marcó "Sí, se descontó" en el formulario. */
+export const NOT_DEDUCTED_LABEL = 'No se marcó como descontado'
+
 /** Color de "mal manejo" (no cumplió una política). */
 export const MISHANDLING_COLOR = '#f87171'
 

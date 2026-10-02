@@ -11,6 +11,7 @@ import {
   DAMAGE_NAME,
   DAMAGE_STATUS_LABELS,
   MISHANDLING_COLOR,
+  NOT_DEDUCTED_LABEL,
   batchFolio,
   deleteReport,
   fetchBatches,
@@ -202,7 +203,7 @@ function ReportsTab({ canManage, onOpenBatch }: { canManage: boolean; onOpenBatc
                     {r.deducted_from_location ? (
                       <span className="text-[#34d399]">Sí</span>
                     ) : (
-                      <span style={{ color: MISHANDLING_COLOR }}>No</span>
+                      <span style={{ color: MISHANDLING_COLOR }}>{NOT_DEDUCTED_LABEL}</span>
                     )}
                   </td>
                   <td className="max-w-64 px-3 py-2.5 text-white/65">{r.observation}</td>
@@ -366,7 +367,7 @@ function WorkTab({ onOpenBatch }: { onOpenBatch: (id: string) => void }) {
                     <span className="text-white/70"> · {r.quantity} u. · {r.origin_name}</span>
                     {!r.deducted_from_location ? (
                       <span className="ml-2 text-xs" style={{ color: MISHANDLING_COLOR }}>
-                        no descontada
+                        {NOT_DEDUCTED_LABEL.toLowerCase()}
                       </span>
                     ) : null}
                     <span className="block text-xs text-white/45">

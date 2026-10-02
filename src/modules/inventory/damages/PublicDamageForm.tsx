@@ -14,10 +14,10 @@ import {
 } from './lib/damages'
 import {
   COLOR,
+  DeductedToggle,
   ErrorText,
   GhostButton,
   PrimaryButton,
-  YesNo,
   errMsg,
   fieldControlClass,
   fieldLabelClass,
@@ -64,7 +64,7 @@ export default function PublicDamageForm() {
   const [originId, setOriginId] = useState('')
   const [sku, setSku] = useState('')
   const [qty, setQty] = useState('')
-  const [deducted, setDeducted] = useState<boolean | null>(null)
+  const [deducted, setDeducted] = useState(false)
   const [observation, setObservation] = useState('')
 
   const [saving, setSaving] = useState(false)
@@ -113,7 +113,6 @@ export default function PublicDamageForm() {
     if (!originId) return setError('Selecciona el origen de la avería.')
     if (!sku.trim()) return setError('Escribe el SKU.')
     if (!Number.isInteger(q) || q <= 0) return setError('La cantidad debe ser un número entero mayor que 0.')
-    if (deducted === null) return setError('Confirma si se descontó de la existencia de la ubicación.')
     if (!observation.trim()) return setError('Escribe una observación.')
     setSaving(true)
     try {
@@ -137,7 +136,7 @@ export default function PublicDamageForm() {
   function another() {
     setSku('')
     setQty('')
-    setDeducted(null)
+    setDeducted(false)
     setObservation('')
     setDone(null)
     setError(null)
@@ -148,7 +147,7 @@ export default function PublicDamageForm() {
       <div className="mx-auto max-w-lg">
         <GlassCard className="p-5 sm:p-6">
           <h2 className="font-display text-xl font-semibold text-white">Reportar avería</h2>
-          <p className="mt-1 text-sm text-white/50">{DAMAGE_NAME} · CD NNEO. Todos los campos son obligatorios.</p>
+          <p className="mt-1 text-sm text-white/50">{DAMAGE_NAME} · CD NNEO. Todos los campos son obligatorios, salvo el descuento de la ubicación.</p>
 
           {state === 'loading' ? <p className="mt-6 text-sm text-white/50">Cargando…</p> : null}
 
@@ -244,8 +243,8 @@ export default function PublicDamageForm() {
               </div>
 
               <div>
-                <span className={fieldLabelClass}>¿Se descontó de la existencia de la ubicación?</span>
-                <YesNo value={deducted} onChange={setDeducted} />
+                <span className={fieldLabelClass}>¿Se descontó de la existencia de la ubicación? (márcalo solo si ya se descontó)</span>
+                <DeductedToggle value={deducted} onChange={setDeducted} />
               </div>
 
               <label className="block">

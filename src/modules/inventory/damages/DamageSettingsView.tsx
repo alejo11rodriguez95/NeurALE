@@ -392,7 +392,7 @@ function PoliciesSection() {
               {!p.active ? <span className="ml-2 text-xs text-white/50">(inactiva)</span> : null}
               {p.code === 'not_deducted' ? (
                 <span className="ml-2 text-xs" style={{ color: COLOR }}>
-                  se marca sola si el colaborador reporta que no se descontó
+                  se marca sola si el colaborador no marca "Sí, se descontó"
                 </span>
               ) : null}
               {p.description ? <span className="block text-xs text-white/45">{p.description}</span> : null}
