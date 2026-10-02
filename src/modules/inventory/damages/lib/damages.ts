@@ -281,9 +281,24 @@ export async function regenerateQrToken(): Promise<string> {
   return rpc<string>('inventory_damage_regenerate_qr')
 }
 
+/**
+ * Dirección pública (producción) a la que apunta el QR. NUNCA la del navegador
+ * actual: si el QR se genera desde un deploy de vista previa de Vercel
+ * (`neur-ale-xxxx.vercel.app`), Vercel le pide iniciar sesión en Vercel a
+ * quien lo escanee (Deployment Protection). Se puede cambiar con la variable
+ * de entorno `VITE_PUBLIC_APP_URL` (sin barra final) si el dominio cambia.
+ */
+export const PUBLIC_APP_URL = ((import.meta.env.VITE_PUBLIC_APP_URL as string | undefined) || 'https://neur-ale.vercel.app').replace(
+  /\/+$/,
+  '',
+)
+
 export function publicFormUrl(token: string): string {
-  return `${window.location.origin}${DAMAGE_PUBLIC_PATH}?t=${encodeURIComponent(token)}`
+  return `${PUBLIC_APP_URL}${DAMAGE_PUBLIC_PATH}?t=${encodeURIComponent(token)}`
 }
+
+/** ¿Esta pantalla se abrió desde otra dirección (p. ej. una vista previa de Vercel)? */
+export const isOffProductionHost = () => window.location.origin !== PUBLIC_APP_URL
 
 /* ---------- Reportes ---------- */
 

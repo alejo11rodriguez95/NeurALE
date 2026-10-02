@@ -10,6 +10,8 @@ import {
   fetchPolicies,
   fetchMailTo,
   fetchQrToken,
+  isOffProductionHost,
+  PUBLIC_APP_URL,
   publicFormUrl,
   regenerateQrToken,
   saveMailTo,
@@ -127,9 +129,15 @@ function QrSection() {
             <GhostButton onClick={() => setConfirm(true)}>Regenerar QR</GhostButton>
           </div>
           <p className="text-xs text-white/40">
-            Genera e imprime el QR desde la dirección oficial de NeurALE (producción): el QR apunta a la dirección desde la que
-            abriste esta pantalla.
+            El QR siempre apunta a la dirección oficial de NeurALE ({PUBLIC_APP_URL}), sin importar desde dónde abras esta
+            pantalla. Quien lo escanee no necesita iniciar sesión en nada.
           </p>
+          {isOffProductionHost() ? (
+            <p className="text-xs text-[#fbbf24]">
+              Estás en otra dirección ({window.location.origin}). El QR igual apunta a producción: no uses un QR generado
+              antes de esta versión desde una vista previa de Vercel, porque esos piden iniciar sesión en Vercel.
+            </p>
+          ) : null}
         </div>
       </GlassCard>
       {confirm ? (
