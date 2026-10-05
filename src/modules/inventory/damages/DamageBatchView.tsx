@@ -6,24 +6,22 @@ import { withAlpha } from '@/shared/modules'
 
 import {
   MISHANDLING_COLOR,
+  NOT_APPLICABLE_COLOR,
+  NOT_APPLICABLE_LABEL,
   NOT_DEDUCTED_LABEL,
   batchFolio,
   cancelBatch,
   closeBatch,
   fetchBatchDetail,
-  involvedCc,
-  markBatchEmailed,
-  mishandlingByDepartment,
   reportFolio,
   saveBatch,
-  saveNotice,
   setFinding,
+  setNotApplicable,
   type BatchDetail,
   type DamagePolicy,
   type DamageReport,
-  type DepartmentMishandling,
 } from './lib/damages'
-import { MAILTO_SAFE_LENGTH, batchMishandlingEmail, mailtoHref, printBatchReport, printDepartmentReport } from './lib/print'
+import { printBatchReport } from './lib/print'
 import {
   COLOR,
   ErrorText,
@@ -40,9 +38,11 @@ import {
 
 /**
  * Lote de averías: Inventory revisa cada SKU contra las políticas de manejo,
- * arma el seguimiento por departamento (reporte + correo), deja su
- * observación final, imprime el reporte para el ajuste y confirma el lote
- * (todo queda ACTUALIZADO). Confirmado, queda de solo lectura.
+ * marca las que "No aplica como avería" (no salen en el reporte para el
+ * ajuste), deja su observación final, imprime el reporte para el ajuste y
+ * confirma el lote (todo queda ACTUALIZADO). Confirmado, queda de solo lectura.
+ * El seguimiento de mal manejo por área + correo se hace después, por semana o
+ * mes cerrado (pestaña "Mal manejo" → DamagePeriodView).
  */
 export function DamageBatchView({ batchId, canManage, onBack }: { batchId: string; canManage: boolean; onBack: () => void }) {
   const { data, error, reload } = useDamagesLive(() => fetchBatchDetail(batchId), [batchId])
@@ -66,14 +66,15 @@ export function DamageBatchView({ batchId, canManage, onBack }: { batchId: strin
       <BatchHeader d={data} />
       <ErrorText>{actionError}</ErrorText>
       <PolicyReview d={data} editable={editable} onError={setActionError} onChanged={reload} />
-      <Departments d={data} editable={editable} onError={setActionError} onChanged={reload} />
       <FinalSection d={data} editable={editable} onError={setActionError} onChanged={reload} onCancelled={onBack} />
     </div>
   )
 }
 
 function BatchHeader({ d }: { d: BatchDetail }) {
-  const units = d.reports.reduce((s, r) => s + r.quantity, 0)
+  const forAdjustment = d.reports.filter((r) => !r.not_applicable)
+  const units = forAdjustment.reduce((s, r) => s + r.quantity, 0)
+  const notApplicable = d.reports.length - forAdjustment.length
   const mishandled = new Set(d.findings.map((f) => f.report_id)).size
   const stat = (label: string, value: string | number, c?: string) => (
     <div>
@@ -97,7 +98,8 @@ function BatchHeader({ d }: { d: BatchDetail }) {
       </div>
       <div className="flex gap-6">
         {stat('Averías', d.reports.length)}
-        {stat('Unidades', units)}
+        {stat('Para ajuste', `${forAdjustment.length} · ${units} u.`)}
+        {stat('No aplica', notApplicable, notApplicable ? NOT_APPLICABLE_COLOR : undefined)}
         {stat('Mal manejo', mishandled, mishandled ? MISHANDLING_COLOR : undefined)}
       </div>
     </GlassCard>
@@ -123,6 +125,20 @@ function PolicyReview({
   const failed = useMemo(() => new Set(d.findings.map((f) => `${f.report_id}:${f.policy_id}`)), [d.findings])
   const [busyKey, setBusyKey] = useState<string | null>(null)
 
+  async function toggleNotApplicable(r: DamageReport) {
+    const key = `${r.id}:na`
+    setBusyKey(key)
+    onError(null)
+    try {
+      await setNotApplicable(r.id, !r.not_applicable)
+      onChanged()
+    } catch (e) {
+      onError(errMsg(e))
+    } finally {
+      setBusyKey(null)
+    }
+  }
+
   async function toggle(r: DamageReport, p: DamagePolicy) {
     const key = `${r.id}:${p.id}`
     setBusyKey(key)
@@ -143,7 +159,7 @@ function PolicyReview({
         <h3 className="font-display text-base font-semibold text-white">1 · Revisión de políticas de manejo</h3>
         <p className="mt-1 text-sm text-white/50">
           {editable
-            ? 'Toca una política para marcarla como NO cumplida en ese SKU. Si el colaborador no marcó que se descontó de la ubicación, ya viene marcada.'
+            ? `Toca una política para marcarla como NO cumplida en ese SKU (si el colaborador no marcó que se descontó de la ubicación, ya viene marcada). "${NOT_APPLICABLE_LABEL}" lo saca del reporte para el ajuste, pero si incumplió políticas sigue contando en el reporte de mal manejo de la semana o del mes.`
             : 'Políticas no cumplidas por SKU.'}
         </p>
       </div>
@@ -154,11 +170,18 @@ function PolicyReview({
             <GlassCard
               key={r.id}
               className="p-4"
-              style={anyFailed ? { borderColor: withAlpha(MISHANDLING_COLOR, 0.45) } : undefined}
+              style={
+                anyFailed
+                  ? { borderColor: withAlpha(MISHANDLING_COLOR, 0.45) }
+                  : r.not_applicable
+                    ? { borderColor: withAlpha(NOT_APPLICABLE_COLOR, 0.45) }
+                    : undefined
+              }
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div className="text-sm">
                   <span className="font-mono text-base text-white">{r.sku}</span>
+                  {r.product_description ? <span className="text-white"> · {r.product_description}</span> : null}
                   <span className="text-white/70">
                     {' '}
                     · {r.quantity} u. · {r.origin_name}
@@ -166,6 +189,11 @@ function PolicyReview({
                   {anyFailed ? (
                     <span className="ml-2 text-xs font-semibold" style={{ color: MISHANDLING_COLOR }}>
                       MAL MANEJO
+                    </span>
+                  ) : null}
+                  {r.not_applicable ? (
+                    <span className="ml-2 text-xs font-semibold" style={{ color: NOT_APPLICABLE_COLOR }}>
+                      NO APLICA COMO AVERÍA
                     </span>
                   ) : null}
                   <span className="block text-xs text-white/45">
@@ -176,6 +204,20 @@ function PolicyReview({
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={!editable || busyKey === `${r.id}:na`}
+                  title="No entra en el reporte impreso para el ajuste. Si incumplió políticas, sí sale en el reporte de mal manejo."
+                  onClick={() => toggleNotApplicable(r)}
+                  className="rounded-full border px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-default"
+                  style={
+                    r.not_applicable
+                      ? { background: withAlpha(NOT_APPLICABLE_COLOR, 0.16), borderColor: NOT_APPLICABLE_COLOR, color: NOT_APPLICABLE_COLOR }
+                      : { borderColor: 'var(--color-neurale-border)', color: 'rgba(255,255,255,0.55)', borderStyle: 'dashed' }
+                  }
+                >
+                  {r.not_applicable ? `⊘ ${NOT_APPLICABLE_LABEL}` : `${NOT_APPLICABLE_LABEL}?`}
+                </button>
                 {policies.map((p) => {
                   const key = `${r.id}:${p.id}`
                   const isFailed = failed.has(key)
@@ -207,258 +249,7 @@ function PolicyReview({
   )
 }
 
-/* ---------- 2. Mal manejo por área + correo único ---------- */
-
-function Departments({
-  d,
-  editable,
-  onError,
-  onChanged,
-}: {
-  d: BatchDetail
-  editable: boolean
-  onError: (m: string | null) => void
-  onChanged: () => void
-}) {
-  const groups = mishandlingByDepartment(d)
-  // Observación por área (borrador local; se guarda al salir del campo).
-  const [notes, setNotes] = useState<Record<string, string>>({})
-  const noteOf = (g: DepartmentMishandling) => notes[g.origin_id] ?? g.notice?.note ?? ''
-
-  return (
-    <section className="space-y-3">
-      <div>
-        <h3 className="font-display text-base font-semibold text-white">2 · Mal manejo por área y correo de seguimiento</h3>
-        <p className="mt-1 text-sm text-white/50">
-          Se envía <b>un solo correo</b> con el detalle de cada área, con copia a los jefes de las áreas involucradas. No se puede
-          confirmar el lote sin abrir ese correo.
-        </p>
-      </div>
-      {groups.length === 0 ? (
-        <GlassCard className="p-4 text-sm text-white/60">Todas las averías cumplen las políticas. No hay correo que enviar.</GlassCard>
-      ) : (
-        <>
-          {groups.map((g) => (
-            <DepartmentCard
-              key={g.origin_id}
-              d={d}
-              g={g}
-              note={noteOf(g)}
-              onNote={(v) => setNotes((prev) => ({ ...prev, [g.origin_id]: v }))}
-              editable={editable}
-              onError={onError}
-              onChanged={onChanged}
-            />
-          ))}
-          <BatchEmailCard
-            d={d}
-            groups={groups}
-            notes={Object.fromEntries(groups.map((g) => [g.origin_id, noteOf(g)]))}
-            editable={editable}
-            onError={onError}
-            onChanged={onChanged}
-          />
-        </>
-      )}
-    </section>
-  )
-}
-
-function DepartmentCard({
-  d,
-  g,
-  note,
-  onNote,
-  editable,
-  onError,
-  onChanged,
-}: {
-  d: BatchDetail
-  g: DepartmentMishandling
-  note: string
-  onNote: (v: string) => void
-  editable: boolean
-  onError: (m: string | null) => void
-  onChanged: () => void
-}) {
-  const ring = ringStyle(COLOR)
-  const saved = g.notice?.note ?? ''
-
-  async function persist() {
-    onError(null)
-    try {
-      await saveNotice(d.batch.id, g.origin_id, note)
-      onChanged()
-    } catch (e) {
-      onError(errMsg(e))
-    }
-  }
-
-  function print() {
-    onError(null)
-    try {
-      printDepartmentReport(d, { ...g, notice: g.notice ? { ...g.notice, note } : g.notice })
-    } catch (e) {
-      onError(errMsg(e))
-    }
-  }
-
-  return (
-    <GlassCard className="space-y-3 p-5" style={{ borderColor: withAlpha(MISHANDLING_COLOR, 0.35) }}>
-      <div>
-        <h4 className="font-display text-base font-semibold text-white">{g.origin_name}</h4>
-        <p className="text-sm text-white/55">
-          {g.reports.length} avería(s) con mal manejo · {g.reports.reduce((s, x) => s + x.report.quantity, 0)} unidades
-        </p>
-        <p className="mt-1 text-xs text-white/45">
-          Jefe(s) en copia:{' '}
-          {g.emails.length ? g.emails.join(', ') : <span style={{ color: '#fbbf24' }}>sin correo configurado (QR y ajustes → Departamentos)</span>}
-        </p>
-      </div>
-
-      <ul className="space-y-1 text-sm">
-        {g.reports.map(({ report: r, failed }) => (
-          <li key={r.id} className="text-white/75">
-            <span className="font-mono text-white">{r.sku}</span> · {r.quantity} u. —{' '}
-            <span style={{ color: MISHANDLING_COLOR }}>{failed.join(', ')}</span>
-          </li>
-        ))}
-      </ul>
-
-      <label className="block">
-        <span className={fieldLabelClass}>Observación de seguimiento para {g.origin_name} (va en el correo y en el reporte)</span>
-        <textarea
-          className={fieldControlClass}
-          style={ring}
-          rows={2}
-          disabled={!editable}
-          value={note}
-          onChange={(e) => onNote(e.target.value)}
-          onBlur={() => editable && note !== saved && persist()}
-        />
-      </label>
-
-      <GhostButton onClick={print}>Imprimir reporte de {g.origin_name}</GhostButton>
-    </GlassCard>
-  )
-}
-
-/** Correo único del lote: Para = destinatario principal (Ajustes); CC = jefes de las áreas involucradas. */
-function BatchEmailCard({
-  d,
-  groups,
-  notes,
-  editable,
-  onError,
-  onChanged,
-}: {
-  d: BatchDetail
-  groups: DepartmentMishandling[]
-  notes: Record<string, string>
-  editable: boolean
-  onError: (m: string | null) => void
-  onChanged: () => void
-}) {
-  const [busy, setBusy] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const to = d.mailTo
-  const cc = involvedCc(groups, to)
-  const missingBoss = groups.filter((g) => g.emails.length === 0).map((g) => g.origin_name)
-  const mail = batchMishandlingEmail(d, groups, notes)
-  const href = mailtoHref(to, cc, mail.subject, mail.body)
-  const tooLong = href.length > MAILTO_SAFE_LENGTH
-  const emailedAt = d.batch.emailed_at
-
-  async function openMail() {
-    setBusy(true)
-    onError(null)
-    try {
-      // Guarda primero las observaciones por área que sigan en borrador.
-      for (const g of groups) {
-        const n = notes[g.origin_id] ?? ''
-        if (n !== (g.notice?.note ?? '')) await saveNotice(d.batch.id, g.origin_id, n)
-      }
-      await markBatchEmailed(d.batch.id, to, cc)
-      onChanged()
-      window.location.href = tooLong
-        ? mailtoHref(to, cc, mail.subject, `${mail.body.slice(0, 900)}\n\n[…] Detalle completo por área en el reporte adjunto.`)
-        : href
-    } catch (e) {
-      onError(errMsg(e))
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function copyBody() {
-    try {
-      await navigator.clipboard.writeText(`${mail.subject}\n\n${mail.body}`)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      onError('No se pudo copiar al portapapeles.')
-    }
-  }
-
-  return (
-    <GlassCard className="space-y-3 p-5" style={{ borderColor: withAlpha(COLOR, 0.45) }}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h4 className="font-display text-base font-semibold text-white">Correo de seguimiento del lote</h4>
-          <p className="text-sm text-white/55">
-            Un solo correo con {groups.length} área(s): {groups.map((g) => g.origin_name).join(', ')}.
-          </p>
-        </div>
-        {emailedAt ? (
-          <span className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold" style={{ background: withAlpha('#34d399', 0.15), color: '#34d399' }}>
-            Correo abierto · {formatDateTimeSV(emailedAt)}
-          </span>
-        ) : (
-          <span className="rounded-full px-2.5 py-0.5 text-[11px] font-semibold" style={{ background: withAlpha('#fbbf24', 0.15), color: '#fbbf24' }}>
-            Correo pendiente
-          </span>
-        )}
-      </div>
-
-      <dl className="grid gap-1 text-sm sm:grid-cols-[4rem_1fr]">
-        <dt className="text-white/45">Para</dt>
-        <dd className="text-white/80">
-          {to.length ? to.join(', ') : <span className="text-white/45">(vacío — lo eliges en Outlook; se configura en QR y ajustes)</span>}
-        </dd>
-        <dt className="text-white/45">CC</dt>
-        <dd className="text-white/80">{cc.length ? cc.join(', ') : <span className="text-white/45">—</span>}</dd>
-        <dt className="text-white/45">Asunto</dt>
-        <dd className="text-white/80">{mail.subject}</dd>
-      </dl>
-
-      {missingBoss.length ? (
-        <p className="text-xs text-[#fbbf24]">
-          Sin correo de jefe configurado: {missingBoss.join(', ')}. Agrégalo en QR y ajustes → Departamentos, o cópialo a mano en Outlook.
-        </p>
-      ) : null}
-
-      <div className="flex flex-wrap gap-2">
-        <GhostButton onClick={copyBody}>{copied ? 'Copiado ✓' : 'Copiar texto del correo'}</GhostButton>
-        {editable ? (
-          <PrimaryButton color={COLOR} disabled={busy} onClick={openMail}>
-            {emailedAt ? 'Abrir correo otra vez' : 'Abrir correo en Outlook'}
-          </PrimaryButton>
-        ) : null}
-      </div>
-      {tooLong && editable ? (
-        <p className="text-xs text-[#fbbf24]">
-          El detalle es largo para un correo armado: se abrirá resumido. Usa "Copiar texto del correo" para pegar el detalle completo.
-        </p>
-      ) : null}
-      <p className="text-xs text-white/40">
-        Imprime el reporte del lote como PDF (sección 3) y adjúntalo antes de enviar. Si cambias alguna política después de abrir el
-        correo, hay que volver a abrirlo.
-      </p>
-    </GlassCard>
-  )
-}
-
-/* ---------- 3. Observación final, impresión y confirmación ---------- */
+/* ---------- 2. Observación final, impresión y confirmación ---------- */
 
 function FinalSection({
   d,
@@ -486,7 +277,7 @@ function FinalSection({
   }, [d.batch.final_note, d.batch.erp_adjustment_ref])
 
   const dirty = note !== (d.batch.final_note ?? '') || erp !== (d.batch.erp_adjustment_ref ?? '')
-  const pendingMail = mishandlingByDepartment(d).length > 0 && !d.batch.emailed_at
+  const forAdjustment = d.reports.filter((r) => !r.not_applicable).length
 
   async function save() {
     setBusy(true)
@@ -537,7 +328,7 @@ function FinalSection({
 
   return (
     <section className="space-y-3">
-      <h3 className="font-display text-base font-semibold text-white">3 · Observación final y confirmación</h3>
+      <h3 className="font-display text-base font-semibold text-white">2 · Observación final y confirmación</h3>
       <GlassCard className="space-y-4 p-5">
         <label className="block">
           <span className={fieldLabelClass}>Observación de las averías trabajadas (va en el reporte impreso)</span>
@@ -563,9 +354,11 @@ function FinalSection({
             </>
           ) : null}
         </div>
-        {editable && pendingMail ? (
-          <p className="text-xs text-[#fbbf24]">Falta abrir el correo de seguimiento por mal manejo (sección 2).</p>
-        ) : null}
+        <p className="text-xs text-white/40">
+          El reporte impreso lleva {forAdjustment} avería(s) para el ajuste
+          {d.reports.length - forAdjustment ? ` (se excluyen ${d.reports.length - forAdjustment} marcada(s) "${NOT_APPLICABLE_LABEL}")` : ''}. El mal
+          manejo se reporta y se envía por correo al cierre de la semana o del mes (pestaña "Mal manejo").
+        </p>
       </GlassCard>
 
       {confirm ? (
@@ -583,12 +376,13 @@ function FinalSection({
         >
           {confirm === 'close' ? (
             <p className="text-sm text-white/70">
-              Las {d.reports.length} averías del lote quedarán en estado <b>ACTUALIZADO</b> y el lote ya no se podrá modificar.
-              Confirma solo después de registrar el ajuste en el sistema de la empresa.
+              Las {d.reports.length} averías del lote quedarán en estado <b>ACTUALIZADO</b> y el lote ya no se podrá modificar
+              ({forAdjustment} para ajuste{d.reports.length - forAdjustment ? `, ${d.reports.length - forAdjustment} no aplica como avería` : ''}). Confirma
+              solo después de registrar el ajuste en el sistema de la empresa.
             </p>
           ) : (
             <p className="text-sm text-white/70">
-              Las {d.reports.length} averías vuelven a PENDIENTE y se descartan las políticas marcadas y los seguimientos de este lote.
+              Las {d.reports.length} averías vuelven a PENDIENTE y se descartan las políticas marcadas y las marcas de "{NOT_APPLICABLE_LABEL}" de este lote.
             </p>
           )}
           <ErrorText>{modalError}</ErrorText>

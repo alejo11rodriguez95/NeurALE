@@ -63,6 +63,7 @@ export default function PublicDamageForm() {
 
   const [originId, setOriginId] = useState('')
   const [sku, setSku] = useState('')
+  const [description, setDescription] = useState('')
   const [qty, setQty] = useState('')
   const [deducted, setDeducted] = useState(false)
   const [observation, setObservation] = useState('')
@@ -112,6 +113,7 @@ export default function PublicDamageForm() {
     if (!employee) return setError('Valida tu código de empleado.')
     if (!originId) return setError('Selecciona el origen de la avería.')
     if (!sku.trim()) return setError('Escribe el SKU.')
+    if (!description.trim()) return setError('Escribe una breve descripción del producto.')
     if (!Number.isInteger(q) || q <= 0) return setError('La cantidad debe ser un número entero mayor que 0.')
     if (!observation.trim()) return setError('Escribe una observación.')
     setSaving(true)
@@ -120,6 +122,7 @@ export default function PublicDamageForm() {
         employee_code: employee.employee_code,
         origin_id: originId,
         sku,
+        description,
         quantity: q,
         deducted,
         observation,
@@ -135,6 +138,7 @@ export default function PublicDamageForm() {
   /** Otra avería: conserva colaborador y origen (lo usual es reportar varias seguidas). */
   function another() {
     setSku('')
+    setDescription('')
     setQty('')
     setDeducted(false)
     setObservation('')
@@ -241,6 +245,19 @@ export default function PublicDamageForm() {
                   />
                 </label>
               </div>
+
+              <label className="block">
+                <span className={fieldLabelClass}>Breve descripción del producto</span>
+                <input
+                  className={fieldControlClass}
+                  style={ring}
+                  value={description}
+                  maxLength={200}
+                  autoComplete="off"
+                  placeholder="Ej. Juego de baño 4 piezas blanco"
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+              </label>
 
               <div>
                 <span className={fieldLabelClass}>¿Se descontó de la existencia de la ubicación? (márcalo solo si ya se descontó)</span>

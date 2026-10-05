@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { addDaysISO, todaySV } from '@/modules/storage/isq/lib/isq'
 
 /**
  * Inventory · Control de Averías (ver ARCHITECTURE.md → "Inventory — Control
@@ -9,10 +10,15 @@ import { supabase } from '@/lib/supabase'
  *   1. El colaborador escanea el QR (sin sesión) y reporta la avería →
  *      estado PENDIENTE.
  *   2. Inventory toma las pendientes en un LOTE (EN TRABAJO), marca qué
- *      políticas de manejo no se cumplieron (= mal manejo), arma el reporte y
- *      el correo de seguimiento por departamento, y deja su observación final.
+ *      políticas de manejo no se cumplieron (= mal manejo) y cuáles "No aplica
+ *      como avería" (quedan fuera del reporte para el ajuste), y deja su
+ *      observación final.
  *   3. Imprime el reporte (anexo del ajuste en el sistema de la empresa) y
  *      confirma: todo el lote queda ACTUALIZADO.
+ *   4. Al cierre de la semana o del mes, arma el reporte de MAL MANEJO del
+ *      período (lotes confirmados en ese período): observación por área,
+ *      un solo correo con CC a los jefes involucrados, y cierra el período
+ *      (v3, 2026-10-05 — migración 20261005120000_inventory_damage_v3_periods.sql).
  *
  * Toda escritura pasa por funciones de la base (RPC) que validan permiso y
  * estado; las tablas no tienen insert/update/delete directo.
@@ -32,6 +38,8 @@ export const DAMAGE_TABLES = {
   batches: 'inventory_damage_batches',
   findings: 'inventory_damage_findings',
   notices: 'inventory_damage_notices',
+  periods: 'inventory_damage_periods',
+  periodNotes: 'inventory_damage_period_notes',
 } as const
 
 /* ---------- Tipos ---------- */
@@ -55,6 +63,10 @@ export const NOT_DEDUCTED_LABEL = 'No se marcó como descontado'
 
 /** Color de "mal manejo" (no cumplió una política). */
 export const MISHANDLING_COLOR = '#f87171'
+
+/** Marcada por Inventory en el lote: no entra al reporte impreso para el ajuste. */
+export const NOT_APPLICABLE_LABEL = 'No aplica como avería'
+export const NOT_APPLICABLE_COLOR = '#fbbf24'
 
 export interface DamageOrigin {
   id: string
@@ -83,12 +95,22 @@ export interface DamageReport {
   origin_id: string
   origin_name: string
   sku: string
+  /** Breve descripción del producto (v3). Null en reportes anteriores al 2026-10-05. */
+  product_description: string | null
   quantity: number
   deducted_from_location: boolean
   observation: string
   status: DamageStatus
   batch_id: string | null
+  /** "No aplica como avería" (lo marca Inventory en el lote). */
+  not_applicable: boolean
+  /** Reporte de mal manejo por período (cerrado) que la incluyó. */
+  period_id: string | null
 }
+
+/** "484152 · Juego de baño" (o solo el SKU si el reporte es anterior a la descripción). */
+export const skuLabel = (r: Pick<DamageReport, 'sku' | 'product_description'>) =>
+  r.product_description ? `${r.sku} · ${r.product_description}` : r.sku
 
 export interface DamageBatch {
   id: string
@@ -99,10 +121,6 @@ export interface DamageBatch {
   final_note: string | null
   erp_adjustment_ref: string | null
   closed_at: string | null
-  /** Correo único de seguimiento del lote (v2): cuándo se abrió y a quién. */
-  emailed_at: string | null
-  emailed_to: string[]
-  emailed_cc: string[]
 }
 
 export interface DamageFinding {
@@ -113,31 +131,19 @@ export interface DamageFinding {
   policy_label: string
 }
 
-export interface DamageNotice {
-  id: string
-  batch_id: string
-  origin_id: string
-  origin_name: string
-  emails: string[]
-  note: string | null
-  emailed_at: string | null
-}
-
 export interface BatchSummary extends DamageBatch {
   reports: number
   units: number
   mishandled: number
+  notApplicable: number
 }
 
 export interface BatchDetail {
   batch: DamageBatch
   reports: DamageReport[]
   findings: DamageFinding[]
-  notices: DamageNotice[]
   policies: DamagePolicy[]
   origins: DamageOrigin[]
-  /** Destinatario(s) principal(es) del correo (Ajustes). Vacío si el usuario no puede leer Ajustes. */
-  mailTo: string[]
 }
 
 /* ---------- Utilidades ---------- */
@@ -156,9 +162,9 @@ async function rpc<T = unknown>(fn: string, args: Record<string, unknown> = {}):
 }
 
 const REPORT_COLS =
-  'id, folio, created_at, reporter_employee_id, reporter_code, reporter_name, origin_id, origin_name, sku, quantity, deducted_from_location, observation, status, batch_id'
+  'id, folio, created_at, reporter_employee_id, reporter_code, reporter_name, origin_id, origin_name, sku, product_description, quantity, deducted_from_location, observation, status, batch_id, not_applicable, period_id'
 const BATCH_COLS =
-  'id, folio, created_at, worked_by_name, status, final_note, erp_adjustment_ref, closed_at, emailed_at, emailed_to, emailed_cc'
+  'id, folio, created_at, worked_by_name, status, final_note, erp_adjustment_ref, closed_at'
 
 /* ---------- Formulario público (QR, sin sesión) ---------- */
 
@@ -188,6 +194,7 @@ export interface NewDamageReport {
   employee_code: string
   origin_id: string
   sku: string
+  description: string
   quantity: number
   deducted: boolean
   observation: string
@@ -203,6 +210,7 @@ export async function submitDamageReport(token: string, input: NewDamageReport):
     p_quantity: input.quantity,
     p_deducted: input.deducted,
     p_observation: input.observation,
+    p_description: input.description,
   })
 }
 
@@ -269,7 +277,7 @@ export async function fetchQrToken(): Promise<string | null> {
   return (data?.qr_token as string | undefined) ?? null
 }
 
-/** Destinatario(s) principal(es) del correo de seguimiento (campo "Para"). */
+/** Destinatario(s) principal(es) del correo de mal manejo del período (campo "Para"). */
 export async function fetchMailTo(): Promise<string[]> {
   const { data, error } = await supabase.from(DAMAGE_TABLES.settings).select('mail_to').eq('id', 1).maybeSingle()
   fail(error)
@@ -346,7 +354,7 @@ export async function fetchBatches(): Promise<BatchSummary[]> {
   if (!batches.length) return []
   const ids = batches.map((b) => b.id)
   const [{ data: reps, error: e1 }, { data: finds, error: e2 }] = await Promise.all([
-    supabase.from(DAMAGE_TABLES.reports).select('id, batch_id, quantity').in('batch_id', ids),
+    supabase.from(DAMAGE_TABLES.reports).select('id, batch_id, quantity, not_applicable').in('batch_id', ids),
     supabase.from(DAMAGE_TABLES.findings).select('batch_id, report_id').in('batch_id', ids),
   ])
   fail(e1)
@@ -359,33 +367,29 @@ export async function fetchBatches(): Promise<BatchSummary[]> {
       reports: r.length,
       units: r.reduce((s, x) => s + (x.quantity as number), 0),
       mishandled: mishandled.size,
+      notApplicable: r.filter((x) => x.not_applicable).length,
     }
   })
 }
 
 export async function fetchBatchDetail(batchId: string): Promise<BatchDetail> {
-  const [b, r, f, n, policies, origins, mailTo] = await Promise.all([
+  const [b, r, f, policies, origins] = await Promise.all([
     supabase.from(DAMAGE_TABLES.batches).select(BATCH_COLS).eq('id', batchId).maybeSingle(),
     supabase.from(DAMAGE_TABLES.reports).select(REPORT_COLS).eq('batch_id', batchId).order('origin_name').order('folio'),
     supabase.from(DAMAGE_TABLES.findings).select('id, batch_id, report_id, policy_id, policy_label').eq('batch_id', batchId),
-    supabase.from(DAMAGE_TABLES.notices).select('id, batch_id, origin_id, origin_name, emails, note, emailed_at').eq('batch_id', batchId),
     fetchPolicies(true),
     fetchOrigins(true),
-    fetchMailTo().catch(() => [] as string[]),
   ])
   fail(b.error)
   fail(r.error)
   fail(f.error)
-  fail(n.error)
   if (!b.data) throw new Error('Lote no encontrado (pudo haberse cancelado).')
   return {
     batch: b.data as DamageBatch,
     reports: (r.data ?? []) as DamageReport[],
     findings: (f.data ?? []) as DamageFinding[],
-    notices: (n.data ?? []) as DamageNotice[],
     policies,
     origins,
-    mailTo,
   }
 }
 
@@ -393,14 +397,9 @@ export async function setFinding(reportId: string, policyId: string, failed: boo
   await rpc('inventory_damage_set_finding', { p_report_id: reportId, p_policy_id: policyId, p_failed: failed })
 }
 
-/** Observación de seguimiento de un área con mal manejo (va en el correo y en los reportes). */
-export async function saveNotice(batchId: string, originId: string, note: string): Promise<void> {
-  await rpc('inventory_damage_save_notice', { p_batch_id: batchId, p_origin_id: originId, p_note: note, p_emailed: false })
-}
-
-/** Registra que se abrió el correo único de seguimiento del lote (Para + CC usados). */
-export async function markBatchEmailed(batchId: string, to: string[], cc: string[]): Promise<void> {
-  await rpc('inventory_damage_batch_mark_emailed', { p_batch_id: batchId, p_to: to, p_cc: cc })
+/** "No aplica como avería": sale del reporte impreso para el ajuste (sigue contando para mal manejo). */
+export async function setNotApplicable(reportId: string, value: boolean): Promise<void> {
+  await rpc('inventory_damage_set_not_applicable', { p_report_id: reportId, p_value: value })
 }
 
 export async function saveBatch(batchId: string, finalNote: string, erpRef: string): Promise<void> {
@@ -422,11 +421,17 @@ export interface DepartmentMishandling {
   origin_name: string
   emails: string[]
   reports: { report: DamageReport; failed: string[] }[]
-  notice: DamageNotice | null
+  /** Observación de seguimiento del área (reporte del período). */
+  note: string | null
 }
 
 /** Agrupa por departamento de origen las averías con al menos una política incumplida. */
-export function mishandlingByDepartment(d: BatchDetail): DepartmentMishandling[] {
+export function mishandlingByDepartment(d: {
+  reports: DamageReport[]
+  findings: DamageFinding[]
+  origins: DamageOrigin[]
+  notes?: { origin_id: string; note: string | null }[]
+}): DepartmentMishandling[] {
   const failedByReport = new Map<string, string[]>()
   for (const f of d.findings) {
     const list = failedByReport.get(f.report_id) ?? []
@@ -440,13 +445,12 @@ export function mishandlingByDepartment(d: BatchDetail): DepartmentMishandling[]
     let g = groups.get(r.origin_id)
     if (!g) {
       const origin = d.origins.find((o) => o.id === r.origin_id)
-      const notice = d.notices.find((n) => n.origin_id === r.origin_id) ?? null
       g = {
         origin_id: r.origin_id,
         origin_name: origin?.name ?? r.origin_name,
         emails: origin?.emails ?? [],
         reports: [],
-        notice,
+        note: d.notes?.find((n) => n.origin_id === r.origin_id)?.note ?? null,
       }
       groups.set(r.origin_id, g)
     }
@@ -470,11 +474,192 @@ export function involvedCc(groups: DepartmentMishandling[], to: string[]): strin
   return out
 }
 
+/* ---------- Reporte de mal manejo por período (semana / mes) ---------- */
+
+export type PeriodKind = 'semana' | 'mes'
+export type PeriodStatus = 'abierto' | 'cerrado'
+
+export const PERIOD_STATUS_LABELS: Record<PeriodStatus, string> = { abierto: 'ABIERTO', cerrado: 'CERRADO' }
+export const PERIOD_STATUS_COLORS: Record<PeriodStatus, string> = { abierto: '#fbbf24', cerrado: '#34d399' }
+
+export interface DamagePeriod {
+  id: string
+  folio: number
+  created_at: string
+  kind: PeriodKind
+  start_date: string
+  end_date: string
+  status: PeriodStatus
+  general_note: string | null
+  emailed_at: string | null
+  emailed_to: string[]
+  emailed_cc: string[]
+  closed_at: string | null
+}
+
+export interface PeriodNote {
+  origin_id: string
+  origin_name: string
+  note: string | null
+}
+
+export interface PeriodDetail {
+  period: DamagePeriod
+  /** Averías de lotes confirmados en el período (abierto) o amarradas a él (cerrado). */
+  reports: DamageReport[]
+  findings: DamageFinding[]
+  notes: PeriodNote[]
+  origins: DamageOrigin[]
+  /** Folio de lote por id (para el detalle). */
+  batchFolios: Record<string, number>
+  /** Destinatario(s) principal(es) del correo (Ajustes). */
+  mailTo: string[]
+}
+
+const PERIOD_COLS = 'id, folio, created_at, kind, start_date, end_date, status, general_note, emailed_at, emailed_to, emailed_cc, closed_at'
+
+const MONTHS = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+
+const dmy = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`
+const dm = (iso: string) => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`
+
+/** "Semana del 28/09 al 04/10/2026" · "Mes de septiembre 2026". */
+export function periodLabel(p: Pick<DamagePeriod, 'kind' | 'start_date' | 'end_date'>): string {
+  if (p.kind === 'mes') return `Mes de ${MONTHS[Number(p.start_date.slice(5, 7)) - 1]} ${p.start_date.slice(0, 4)}`
+  return `Semana del ${dm(p.start_date)} al ${dmy(p.end_date)}`
+}
+
+/** Lunes de la semana de una fecha YYYY-MM-DD. */
+export function weekStart(date: string): string {
+  const dow = new Date(`${date}T12:00:00Z`).getUTCDay() // 0 = domingo
+  return addDaysISO(date, -((dow + 6) % 7))
+}
+
+function monthEnd(start: string): string {
+  const y = Number(start.slice(0, 4))
+  const m = Number(start.slice(5, 7))
+  const next = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`
+  return addDaysISO(next, -1)
+}
+
+/** Semanas (lunes–domingo) o meses YA terminados, del más reciente al más viejo. */
+export function completedPeriods(kind: PeriodKind, count: number, today = todaySV()): { start: string; end: string }[] {
+  const out: { start: string; end: string }[] = []
+  if (kind === 'semana') {
+    let start = addDaysISO(weekStart(today), -7)
+    for (let i = 0; i < count; i++) {
+      out.push({ start, end: addDaysISO(start, 6) })
+      start = addDaysISO(start, -7)
+    }
+  } else {
+    let y = Number(today.slice(0, 4))
+    let m = Number(today.slice(5, 7))
+    for (let i = 0; i < count; i++) {
+      m -= 1
+      if (m === 0) {
+        m = 12
+        y -= 1
+      }
+      const start = `${y}-${String(m).padStart(2, '0')}-01`
+      out.push({ start, end: monthEnd(start) })
+    }
+  }
+  return out
+}
+
+export async function fetchPeriods(): Promise<DamagePeriod[]> {
+  const { data, error } = await supabase.from(DAMAGE_TABLES.periods).select(PERIOD_COLS).order('start_date', { ascending: false }).order('kind').limit(200)
+  fail(error)
+  return (data ?? []) as DamagePeriod[]
+}
+
+function chunks<T>(list: T[], size = 150): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size))
+  return out
+}
+
+export async function fetchPeriodDetail(periodId: string): Promise<PeriodDetail> {
+  const [p, ids, n, origins, mailTo] = await Promise.all([
+    supabase.from(DAMAGE_TABLES.periods).select(PERIOD_COLS).eq('id', periodId).maybeSingle(),
+    rpc<string[] | null>('inventory_damage_period_report_ids', { p_period_id: periodId }),
+    supabase.from(DAMAGE_TABLES.periodNotes).select('origin_id, origin_name, note').eq('period_id', periodId),
+    fetchOrigins(true),
+    fetchMailTo().catch(() => [] as string[]),
+  ])
+  fail(p.error)
+  fail(n.error)
+  if (!p.data) throw new Error('Reporte de período no encontrado (pudo haberse descartado).')
+  const reportIds = (ids ?? []).map(String)
+
+  const reports: DamageReport[] = []
+  const findings: DamageFinding[] = []
+  for (const part of chunks(reportIds)) {
+    const [r, f] = await Promise.all([
+      supabase.from(DAMAGE_TABLES.reports).select(REPORT_COLS).in('id', part),
+      supabase.from(DAMAGE_TABLES.findings).select('id, batch_id, report_id, policy_id, policy_label').in('report_id', part),
+    ])
+    fail(r.error)
+    fail(f.error)
+    reports.push(...((r.data ?? []) as DamageReport[]))
+    findings.push(...((f.data ?? []) as DamageFinding[]))
+  }
+  reports.sort((a, b) => a.origin_name.localeCompare(b.origin_name) || a.folio - b.folio)
+
+  const batchFolios: Record<string, number> = {}
+  const batchIds = [...new Set(reports.map((r) => r.batch_id).filter((x): x is string => !!x))]
+  for (const part of chunks(batchIds)) {
+    const { data, error } = await supabase.from(DAMAGE_TABLES.batches).select('id, folio').in('id', part)
+    fail(error)
+    for (const b of data ?? []) batchFolios[b.id as string] = b.folio as number
+  }
+
+  return {
+    period: p.data as DamagePeriod,
+    reports,
+    findings,
+    notes: (n.data ?? []) as PeriodNote[],
+    origins,
+    batchFolios,
+    mailTo,
+  }
+}
+
+/** Crea (o abre, si ya existe) el reporte de una semana / un mes terminado. */
+export async function createPeriod(kind: PeriodKind, start: string): Promise<string> {
+  return rpc<string>('inventory_damage_period_create', { p_kind: kind, p_start: start })
+}
+
+export async function savePeriodNote(periodId: string, originId: string, note: string): Promise<void> {
+  await rpc('inventory_damage_period_save_note', { p_period_id: periodId, p_origin_id: originId, p_note: note })
+}
+
+export async function savePeriod(periodId: string, generalNote: string): Promise<void> {
+  await rpc('inventory_damage_period_save', { p_period_id: periodId, p_general_note: generalNote })
+}
+
+/** Registra que se abrió el correo único del período (Para + CC usados). */
+export async function markPeriodEmailed(periodId: string, to: string[], cc: string[]): Promise<void> {
+  await rpc('inventory_damage_period_mark_emailed', { p_period_id: periodId, p_to: to, p_cc: cc })
+}
+
+export async function closePeriod(periodId: string, generalNote: string): Promise<void> {
+  await rpc('inventory_damage_period_close', { p_period_id: periodId, p_general_note: generalNote })
+}
+
+export async function reopenPeriod(periodId: string): Promise<void> {
+  await rpc('inventory_damage_period_reopen', { p_period_id: periodId })
+}
+
+export async function deletePeriod(periodId: string): Promise<void> {
+  await rpc('inventory_damage_period_delete', { p_period_id: periodId })
+}
+
 /* ---------- Tiempo real ---------- */
 
 export function subscribeDamages(onChange: () => void): () => void {
   const channel = supabase.channel(`damages-${Math.random().toString(36).slice(2)}`)
-  ;[DAMAGE_TABLES.reports, DAMAGE_TABLES.batches, DAMAGE_TABLES.findings, DAMAGE_TABLES.notices].forEach((table) =>
+  ;[DAMAGE_TABLES.reports, DAMAGE_TABLES.batches, DAMAGE_TABLES.findings, DAMAGE_TABLES.periods, DAMAGE_TABLES.periodNotes].forEach((table) =>
     channel.on('postgres_changes', { event: '*', schema: 'public', table }, onChange),
   )
   channel.subscribe()

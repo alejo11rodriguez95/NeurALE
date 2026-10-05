@@ -6,11 +6,14 @@ import { GlassCard } from '@/shared/components/GlassCard'
 import { withAlpha } from '@/shared/modules'
 
 import { DamageBatchView } from './DamageBatchView'
+import { DamagePeriodView, DamagePeriodsTab } from './DamagePeriodView'
 import { DamageSettingsView } from './DamageSettingsView'
 import {
   DAMAGE_NAME,
   DAMAGE_STATUS_LABELS,
   MISHANDLING_COLOR,
+  NOT_APPLICABLE_COLOR,
+  NOT_APPLICABLE_LABEL,
   NOT_DEDUCTED_LABEL,
   batchFolio,
   deleteReport,
@@ -39,7 +42,7 @@ import {
   useDamagesLive,
 } from './ui'
 
-type Tab = 'reportes' | 'trabajar' | 'historial' | 'ajustes'
+type Tab = 'reportes' | 'trabajar' | 'historial' | 'malmanejo' | 'ajustes'
 
 /**
  * Inventory → Control de Averías (`?view=averias`). Pestañas internas con
@@ -47,6 +50,8 @@ type Tab = 'reportes' | 'trabajar' | 'historial' | 'ajustes'
  *   - Reportes: listado de todas las averías reportadas desde el QR.
  *   - Trabajar averías: toma las pendientes en un lote (solo gestor).
  *   - Historial: lotes trabajados (reimprimir el reporte).
+ *   - Mal manejo: reporte por semana o mes cerrado, con observación por área y
+ *     un solo correo con CC a los jefes involucrados (`&periodo=<id>`).
  *   - QR y ajustes: QR del formulario, departamentos y políticas (solo gestor).
  */
 export function DamageControlView() {
@@ -54,23 +59,37 @@ export function DamageControlView() {
   const canManage = useCanManageDamages()
   const tab = (params.get('tab') as Tab | null) ?? 'reportes'
   const batchId = params.get('lote')
+  const periodId = params.get('periodo')
 
-  function go(next: { tab?: Tab; lote?: string | null }) {
+  function go(next: { tab?: Tab; lote?: string | null; periodo?: string | null }) {
     const p = new URLSearchParams(params)
     if (next.tab) p.set('tab', next.tab)
     if (next.lote) p.set('lote', next.lote)
     else p.delete('lote')
+    if (next.periodo) p.set('periodo', next.periodo)
+    else p.delete('periodo')
     setParams(p)
   }
 
   if (batchId) {
     return <DamageBatchView batchId={batchId} canManage={!!canManage} onBack={() => go({ tab, lote: null })} />
   }
+  if (periodId) {
+    return (
+      <DamagePeriodView
+        periodId={periodId}
+        canManage={!!canManage}
+        onBack={() => go({ tab: 'malmanejo', periodo: null })}
+        onOpenBatch={(id) => go({ tab: 'historial', lote: id })}
+      />
+    )
+  }
 
   const tabs: [Tab, string][] = [
     ['reportes', 'Reportes'],
     ...(canManage ? ([['trabajar', 'Trabajar averías']] as [Tab, string][]) : []),
     ['historial', 'Historial'],
+    ['malmanejo', 'Mal manejo'],
     ...(canManage ? ([['ajustes', 'QR y ajustes']] as [Tab, string][]) : []),
   ]
   const current = tabs.some(([t]) => t === tab) ? tab : 'reportes'
@@ -79,7 +98,7 @@ export function DamageControlView() {
     <div className="space-y-6">
       <SectionTitle
         title={DAMAGE_NAME}
-        subtitle="Los colaboradores reportan desde el QR; Inventory trabaja las averías acumuladas, revisa las políticas de manejo y confirma el lote."
+        subtitle="Los colaboradores reportan desde el QR; Inventory trabaja las averías acumuladas, revisa las políticas de manejo y confirma el lote. El mal manejo se reporta por semana o mes cerrado."
       />
       <div className="flex flex-wrap gap-2">
         {tabs.map(([t, label]) => (
@@ -91,6 +110,7 @@ export function DamageControlView() {
       {current === 'reportes' ? <ReportsTab canManage={!!canManage} onOpenBatch={(id) => go({ lote: id })} /> : null}
       {current === 'trabajar' && canManage ? <WorkTab onOpenBatch={(id) => go({ tab: 'trabajar', lote: id })} /> : null}
       {current === 'historial' ? <HistoryTab onOpenBatch={(id) => go({ tab: 'historial', lote: id })} /> : null}
+      {current === 'malmanejo' ? <DamagePeriodsTab canManage={!!canManage} onOpenPeriod={(id) => go({ tab: 'malmanejo', periodo: id })} /> : null}
       {current === 'ajustes' && canManage ? <DamageSettingsView /> : null}
     </div>
   )
@@ -125,6 +145,7 @@ function ReportsTab({ canManage, onOpenBatch }: { canManage: boolean; onOpenBatc
         (r) =>
           !q ||
           r.sku.toLowerCase().includes(q) ||
+          (r.product_description ?? '').toLowerCase().includes(q) ||
           r.reporter_name.toLowerCase().includes(q) ||
           r.reporter_code.toLowerCase().includes(q) ||
           r.origin_name.toLowerCase().includes(q) ||
@@ -158,7 +179,7 @@ function ReportsTab({ canManage, onOpenBatch }: { canManage: boolean; onOpenBatc
         ) : null}
         <label className="min-w-48 flex-1">
           <span className={fieldLabelClass}>Buscar</span>
-          <input className={fieldControlClass} style={ring} placeholder="SKU, colaborador, origen, folio…" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <input className={fieldControlClass} style={ring} placeholder="SKU, descripción, colaborador, origen, folio…" value={search} onChange={(e) => setSearch(e.target.value)} />
         </label>
       </div>
 
@@ -197,7 +218,10 @@ function ReportsTab({ canManage, onOpenBatch }: { canManage: boolean; onOpenBatc
                     <span className="block text-xs text-white/40">{r.reporter_code}</span>
                   </td>
                   <td className="px-3 py-2.5 text-white/75">{r.origin_name}</td>
-                  <td className="px-3 py-2.5 font-mono text-white">{r.sku}</td>
+                  <td className="px-3 py-2.5 text-white">
+                    <span className="font-mono">{r.sku}</span>
+                    {r.product_description ? <span className="block max-w-56 text-xs text-white/55">{r.product_description}</span> : null}
+                  </td>
                   <td className="px-3 py-2.5 text-right text-white">{r.quantity}</td>
                   <td className="px-3 py-2.5">
                     {r.deducted_from_location ? (
@@ -209,6 +233,11 @@ function ReportsTab({ canManage, onOpenBatch }: { canManage: boolean; onOpenBatc
                   <td className="max-w-64 px-3 py-2.5 text-white/65">{r.observation}</td>
                   <td className="px-3 py-2.5">
                     <StatusBadge status={r.status} />
+                    {r.not_applicable ? (
+                      <span className="mt-1 block text-[11px] font-semibold whitespace-nowrap" style={{ color: NOT_APPLICABLE_COLOR }}>
+                        {NOT_APPLICABLE_LABEL}
+                      </span>
+                    ) : null}
                   </td>
                   <td className="px-3 py-2.5 text-right whitespace-nowrap">
                     {r.batch_id ? (
@@ -364,6 +393,7 @@ function WorkTab({ onOpenBatch }: { onOpenBatch: (id: string) => void }) {
                   />
                   <span className="flex-1">
                     <span className="font-mono text-white">{r.sku}</span>
+                    {r.product_description ? <span className="text-white"> · {r.product_description}</span> : null}
                     <span className="text-white/70"> · {r.quantity} u. · {r.origin_name}</span>
                     {!r.deducted_from_location ? (
                       <span className="ml-2 text-xs" style={{ color: MISHANDLING_COLOR }}>
@@ -416,6 +446,7 @@ function HistoryTab({ onOpenBatch }: { onOpenBatch: (id: string) => void }) {
                 <th className="px-3 py-2.5">Trabajado por</th>
                 <th className="px-3 py-2.5 text-right">Averías</th>
                 <th className="px-3 py-2.5 text-right">Unidades</th>
+                <th className="px-3 py-2.5 text-right">No aplica</th>
                 <th className="px-3 py-2.5 text-right">Mal manejo</th>
                 <th className="px-3 py-2.5">Nº ajuste</th>
                 <th className="px-3 py-2.5">Estado</th>
@@ -430,6 +461,9 @@ function HistoryTab({ onOpenBatch }: { onOpenBatch: (id: string) => void }) {
                   <td className="px-3 py-2.5 text-white/75">{b.worked_by_name || '—'}</td>
                   <td className="px-3 py-2.5 text-right text-white">{b.reports}</td>
                   <td className="px-3 py-2.5 text-right text-white">{b.units}</td>
+                  <td className="px-3 py-2.5 text-right" style={{ color: b.notApplicable ? NOT_APPLICABLE_COLOR : undefined }}>
+                    {b.notApplicable}
+                  </td>
                   <td className="px-3 py-2.5 text-right" style={{ color: b.mishandled ? MISHANDLING_COLOR : undefined }}>
                     {b.mishandled}
                   </td>

@@ -205,7 +205,7 @@ function MailToSection() {
       <div>
         <h3 className="font-display text-base font-semibold text-white">Correo de seguimiento por mal manejo</h3>
         <p className="mt-1 text-sm text-white/50">
-          Cada lote genera un solo correo. <b>Para</b>: estos destinatarios (por ejemplo, gerencia del CD). <b>CC</b>: los jefes
+          El reporte de mal manejo de cada semana o mes genera un solo correo. <b>Para</b>: estos destinatarios (por ejemplo, gerencia del CD). <b>CC</b>: los jefes
           de las áreas involucradas, según los correos de cada departamento de abajo.
         </p>
       </div>
