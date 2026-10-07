@@ -1,6 +1,6 @@
 import type { ModuleId } from '@/shared/modules'
 import { supabase } from '@/lib/supabase'
-import { ISQ_TABLES, countIsqByShift, countIsqInShift } from '@/modules/storage/isq/lib/isq'
+import { ISQ_TABLES } from '@/modules/storage/isq/lib/isq'
 
 import {
   addDays,
@@ -10,6 +10,7 @@ import {
   slotKeyOf,
   slotMode,
   type Goals,
+  type ShiftsConfig,
   type HkValue,
   type ProcessId,
   type QualityMetric,
@@ -251,6 +252,40 @@ async function fetchFillRateDaily(from: string, to: string): Promise<Map<string,
   return new Map(((data ?? []) as FillRateDailyRow[]).map((r) => [r.fr_date, r]))
 }
 
+/**
+ * Incidencias ISQ por casilla del tablero (turno o día), con los MISMOS
+ * horarios de Ajustes → Turnos que usa Registro x Pallet (`slotKeyOf`).
+ * Corrección 2026-10-07 (chat de Inventory, excepción acordada con Josué):
+ * antes se contaba con ventanas fijas A 06–14 / B 14–22 (`countIsqInShift`),
+ * así que con un solo turno habilitado (modo día) o con horarios distintos las
+ * incidencias fuera de esa ventana no sumaban, y las de 22:00–06:00 nunca.
+ * Ahora ninguna se pierde: modo día = todo el día; modo turno = desde el inicio
+ * de A → A, desde el inicio de B → B, madrugada → B del día anterior.
+ */
+async function countIsqSlots(from: string, to: string, cfg: ShiftsConfig): Promise<Map<string, number>> {
+  const { data, error } = await supabase
+    .from(ISQ_TABLES.incidents)
+    .select('reported_at')
+    .gte('reported_at', `${from}T00:00:00-06:00`)
+    .lt('reported_at', `${addDays(to, 2)}T00:00:00-06:00`)
+    .limit(10000)
+  fail(error)
+  const out = new Map<string, number>()
+  for (const r of (data ?? []) as { reported_at: string }[]) {
+    const k = slotKeyOf(r.reported_at, cfg)
+    out.set(k, (out.get(k) ?? 0) + 1)
+  }
+  return out
+}
+
+/** Mismo conteo, indexado por `fecha|turno` del tablero (en modo día, el turno habilitado). */
+async function countIsqByBoardShift(from: string, to: string, cfg: ShiftsConfig): Promise<Map<string, number>> {
+  const slots = await countIsqSlots(from, to, cfg)
+  if (slotMode(cfg) === 'shift') return slots
+  const id: ShiftId = cfg.A.enabled ? 'A' : 'B'
+  return new Map([...slots].map(([date, n]) => [`${date}|${id}`, n]))
+}
+
 export async function fetchShiftData(date: string, shift: ShiftId, goals: Goals): Promise<TacticalData> {
   const frDate = fillRateDateFor(date)
   const [storageSlots, frDaily] = await Promise.all([
@@ -263,7 +298,9 @@ export async function fetchShiftData(date: string, shift: ShiftId, goals: Goals)
     supabase.from(T.safety).select('*').eq('shift_date', date).eq('shift', shift).maybeSingle(),
     supabase.from(T.shift).select('*').eq('shift_date', date).eq('shift', shift).maybeSingle(),
     supabase.from(T.quality).select('*').eq('shift_date', date).eq('shift', shift),
-    countIsqInShift(date, shift).catch(() => null),
+    countIsqSlots(date, date, goals.shifts)
+      .then((m) => m.get(slotKeyFor(date, shift, goals.shifts)) ?? 0)
+      .catch(() => null),
   ])
   fail(p.error)
   fail(q.error)
@@ -304,7 +341,7 @@ export async function fetchRange(from: string, to: string, goals: Goals) {
     q<SafetyRow>(T.safety),
     q<Record<string, unknown>>(T.shift),
     q<QualityRow>(T.quality),
-    countIsqByShift(from, to).catch(() => null),
+    countIsqByBoardShift(from, to, goals.shifts).catch(() => null),
   ])
   const [storageSlots, frDaily] = await Promise.all([
     fetchStorageSlots(from, to, goals),
