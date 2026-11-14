@@ -195,6 +195,27 @@ export interface AuditLine {
   recount_at: string | null
 }
 
+/** Una llave de la auditoría (del formato o sobrante) con su estado de conteo. */
+export interface AuditKey {
+  key_value: string
+  sku: string
+  description: string | null
+  location: string | null
+  extra: Record<string, string>
+  is_extra: boolean
+  counted: boolean
+  counted_by: string | null
+  counted_at: string | null
+  recounted: boolean
+  recount_by: string | null
+  recount_at: string | null
+  /** null para quien solo cuenta (conteo ciego). */
+  expected: number | null
+  /** Lo contado: todo para configuradores; para quien solo cuenta, solo lo suyo. */
+  counted_qty: number | null
+  recount_qty: number | null
+}
+
 export interface AuditExtra {
   id: string
   key_value: string
@@ -435,6 +456,27 @@ export async function fetchAuditLines(auditId: string): Promise<AuditLine[]> {
       ...rows.map((r) => ({
         ...r,
         expected_qty: Number(r.expected_qty),
+        counted_qty: num(r.counted_qty),
+        recount_qty: num(r.recount_qty),
+      })),
+    )
+    if (rows.length < 1000) break
+  }
+  return out
+}
+
+/** Todas las llaves de una auditoría con su estado (por páginas de 1000). */
+export async function fetchAuditKeys(auditId: string): Promise<AuditKey[]> {
+  const out: AuditKey[] = []
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await supabase.rpc('storage_opl_audit_keys', { p_audit: auditId }).range(from, from + 999)
+    fail(error)
+    const rows = (data ?? []) as AuditKey[]
+    out.push(
+      ...rows.map((r) => ({
+        ...r,
+        extra: (r.extra as Record<string, string>) ?? {},
+        expected: num(r.expected),
         counted_qty: num(r.counted_qty),
         recount_qty: num(r.recount_qty),
       })),

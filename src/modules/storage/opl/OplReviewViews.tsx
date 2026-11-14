@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { Fragment, useMemo, useState } from 'react'
 
 import { Chip, GhostButton, PrimaryButton, SectionTitle, fieldControlClass, fieldLabelClass, ringStyle } from '@/modules/storage/isq/ui'
 import { GlassCard } from '@/shared/components/GlassCard'
@@ -24,6 +24,7 @@ import {
   type SkuLine,
   type SkuSummary,
 } from './lib/opl'
+import { KeyTable, keyMatches, normSearch, useAuditKeys } from './OplKeyDetail'
 import { AuditCard, Badge, EmptyState, ErrorState, Kpi, ProgressBar, useOplLive } from './ui'
 
 const storage = MODULES.find((m) => m.id === 'storage')!
@@ -37,7 +38,10 @@ function useAuditsWithOperators() {
   return useOplLive(async () => {
     const [audits, ops] = await Promise.all([fetchAudits(), fetchOperators(true)])
     const names = new Map(ops.map((o) => [o.id, o.name]))
-    return audits.map((a) => ({ audit: a, operator: names.get(a.operator_id) ?? '' }))
+    return audits.map((a) => ({
+      audit: a,
+      operator: names.get(a.operator_id) ?? '',
+    }))
   }, [])
 }
 
@@ -139,7 +143,9 @@ function DiscrepancyList({ auditId, canManage, onChange }: { auditId: string; ca
   const list = useMemo(() => {
     const d = (data ?? []).filter((s) => s.discrepancy)
     return d.filter((s) =>
-      filter === 'abiertas' ? !s.review_status || s.review_status === 'reconteo' : s.review_status === 'cuadrado' || s.review_status === 'diferencia_confirmada',
+      filter === 'abiertas'
+        ? !s.review_status || s.review_status === 'reconteo'
+        : s.review_status === 'cuadrado' || s.review_status === 'diferencia_confirmada',
     )
   }, [data, filter])
   const openCount = (data ?? []).filter((s) => s.discrepancy && (!s.review_status || s.review_status === 'reconteo')).length
@@ -203,7 +209,10 @@ function DiscrepancyList({ auditId, canManage, onChange }: { auditId: string; ca
 }
 
 function SkuRecount({ auditId, summary, canManage, onChanged }: { auditId: string; summary: SkuSummary; canManage: boolean; onChanged: () => void }) {
-  const { data, error, reload } = useOplLive(() => fetchSkuLines(auditId, summary.sku), [auditId, summary.sku, summary.lines_recounted, summary.extra_lines])
+  const { data, error, reload } = useOplLive(
+    () => fetchSkuLines(auditId, summary.sku),
+    [auditId, summary.sku, summary.lines_recounted, summary.extra_lines],
+  )
   const [note, setNote] = useState(summary.review_note ?? '')
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState<string | null>(null)
@@ -239,7 +248,14 @@ function SkuRecount({ auditId, summary, canManage, onChanged }: { auditId: strin
       ) : (
         <ul className="space-y-2">
           {data.map((l) => (
-            <RecountRow key={(l.is_extra ? 'x' : 'l') + l.key_value} auditId={auditId} line={l} canManage={canManage} closed={closed} onSaved={reload} />
+            <RecountRow
+              key={(l.is_extra ? 'x' : 'l') + l.key_value}
+              auditId={auditId}
+              line={l}
+              canManage={canManage}
+              closed={closed}
+              onSaved={reload}
+            />
           ))}
         </ul>
       )}
@@ -249,9 +265,19 @@ function SkuRecount({ auditId, summary, canManage, onChanged }: { auditId: strin
           <div className="flex flex-wrap items-center gap-3 text-sm text-white/60">
             <span>
               Cerrado por {summary.review_closed_by ?? '—'}
-              {summary.review_closed_at ? ` · ${new Date(summary.review_closed_at).toLocaleString('es-SV', { dateStyle: 'short', timeStyle: 'short' })}` : ''}
+              {summary.review_closed_at
+                ? ` · ${new Date(summary.review_closed_at).toLocaleString('es-SV', { dateStyle: 'short', timeStyle: 'short' })}`
+                : ''}
             </span>
-            <GhostButton onClick={() => reopenReview(auditId, summary.sku).then(onChanged).catch((e) => setMsg(errMsg(e)))}>Reabrir</GhostButton>
+            <GhostButton
+              onClick={() =>
+                reopenReview(auditId, summary.sku)
+                  .then(onChanged)
+                  .catch((e) => setMsg(errMsg(e)))
+              }
+            >
+              Reabrir
+            </GhostButton>
           </div>
         ) : (
           <div className="space-y-3 rounded-xl border border-neurale-border bg-white/[0.03] p-3">
@@ -264,7 +290,13 @@ function SkuRecount({ auditId, summary, canManage, onChanged }: { auditId: strin
             </p>
             <label className="block">
               <span className={fieldLabelClass}>Nota (obligatoria para confirmar diferencia)</span>
-              <input className={fieldControlClass} style={ring} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Ej. 1 unidad dañada, se reporta al OPL" />
+              <input
+                className={fieldControlClass}
+                style={ring}
+                value={note}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="Ej. 1 unidad dañada, se reporta al OPL"
+              />
             </label>
             <div className="flex flex-wrap gap-2">
               <PrimaryButton color="#4ade80" disabled={busy || !allRecounted || diff !== 0} onClick={() => close('cuadrado')}>
@@ -282,7 +314,19 @@ function SkuRecount({ auditId, summary, canManage, onChanged }: { auditId: strin
   )
 }
 
-function RecountRow({ auditId, line, canManage, closed, onSaved }: { auditId: string; line: SkuLine; canManage: boolean; closed: boolean; onSaved: () => void }) {
+function RecountRow({
+  auditId,
+  line,
+  canManage,
+  closed,
+  onSaved,
+}: {
+  auditId: string
+  line: SkuLine
+  canManage: boolean
+  closed: boolean
+  onSaved: () => void
+}) {
   const [qty, setQty] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState<string | null>(null)
@@ -305,7 +349,12 @@ function RecountRow({ auditId, line, canManage, closed, onSaved }: { auditId: st
   }
 
   return (
-    <li className="rounded-xl border px-3 py-2" style={{ borderColor: mismatch ? 'rgba(248,113,113,0.4)' : 'var(--color-neurale-border)' }}>
+    <li
+      className="rounded-xl border px-3 py-2"
+      style={{
+        borderColor: mismatch ? 'rgba(248,113,113,0.4)' : 'var(--color-neurale-border)',
+      }}
+    >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="text-sm text-white">
@@ -336,7 +385,12 @@ function RecountRow({ auditId, line, canManage, closed, onSaved }: { auditId: st
             <button
               type="button"
               className="text-xs text-white/40 hover:text-rose-300"
-              onClick={() => window.confirm(`¿Eliminar el sobrante ${line.key_value}?`) && deleteExtra(line.extra_id!).then(onSaved).catch((e) => setErr(errMsg(e)))}
+              onClick={() =>
+                window.confirm(`¿Eliminar el sobrante ${line.key_value}?`) &&
+                deleteExtra(line.extra_id!)
+                  .then(onSaved)
+                  .catch((e) => setErr(errMsg(e)))
+              }
             >
               Eliminar
             </button>
@@ -383,8 +437,15 @@ export function OplResultsView({
 }) {
   return (
     <div className="space-y-5">
-      <SectionTitle title="Resultados y avance" subtitle="Avance en vivo de la auditoría: LPN y unidades contadas, estado de cada SKU y conteo por persona." />
-      {auditId ? <Results auditId={auditId} canManage={canManage} onChange={() => onPickAudit(null)} /> : <AuditPicker onPick={onPickAudit} hint="Elige la auditoría." />}
+      <SectionTitle
+        title="Resultados y avance"
+        subtitle="Avance en vivo de la auditoría: LPN y unidades contadas, estado de cada SKU y conteo por persona."
+      />
+      {auditId ? (
+        <Results auditId={auditId} canManage={canManage} onChange={() => onPickAudit(null)} />
+      ) : (
+        <AuditPicker onPick={onPickAudit} hint="Elige la auditoría." />
+      )}
     </div>
   )
 }
@@ -397,6 +458,29 @@ function Results({ auditId, canManage, onChange }: { auditId: string; canManage:
   const counters = useOplLive(() => fetchCounters(auditId), [auditId, tick])
   const [stateFilter, setStateFilter] = useState<SkuState | 'todos'>('todos')
   const [exporting, setExporting] = useState(false)
+  const [mode, setMode] = useState<'sku' | 'llave'>('sku')
+  const [query, setQuery] = useState('')
+  const [skuSort, setSkuSort] = useState<'sku' | 'pendientes'>('sku')
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
+  const q = normSearch(query)
+  // Las llaves solo se cargan cuando hacen falta (buscar, abrir un SKU o la vista por llave).
+  const keys = useAuditKeys(auditId, tick, mode === 'llave' || q !== '' || expanded.size > 0)
+  const keysBySku = useMemo(() => {
+    const m = new Map<string, NonNullable<typeof keys.data>>()
+    for (const k of keys.data ?? []) {
+      const arr = m.get(k.sku)
+      if (arr) arr.push(k)
+      else m.set(k.sku, [k])
+    }
+    return m
+  }, [keys.data])
+  const toggleSku = (sku: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(sku)) next.delete(sku)
+      else next.add(sku)
+      return next
+    })
 
   const closedAudit = audit?.status === 'cerrada'
   const stats = useMemo(() => {
@@ -432,23 +516,69 @@ function Results({ auditId, canManage, onChange }: { auditId: string; canManage:
         const s = v === null || v === undefined ? '' : String(v)
         return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s
       }
-      const dt = (s: string | null) => (s ? new Date(s).toLocaleString('es-SV', { timeZone: 'America/El_Salvador' }) : '')
+      const dt = (s: string | null) =>
+        s
+          ? new Date(s).toLocaleString('es-SV', {
+              timeZone: 'America/El_Salvador',
+            })
+          : ''
       const head = [
-        'Tipo', audit.mapping.key_label, 'Ubicación', 'SKU', 'Descripción', ...extraCols, 'Cant. formato', '1er conteo', 'Contó', 'Hora',
-        'Reconteo', 'Recontó', 'Hora reconteo', 'Cant. final', 'Diferencia', 'Estado',
+        'Tipo',
+        audit.mapping.key_label,
+        'Ubicación',
+        'SKU',
+        'Descripción',
+        ...extraCols,
+        'Cant. formato',
+        '1er conteo',
+        'Contó',
+        'Hora',
+        'Reconteo',
+        'Recontó',
+        'Hora reconteo',
+        'Cant. final',
+        'Diferencia',
+        'Estado',
       ]
       const rows = lines.map((l) => {
         const fin = l.recount_qty ?? l.counted_qty
         return [
-          'Formato', l.key_value, l.location, l.sku, l.description, ...extraCols.map((c) => l.extra?.[c] ?? ''), l.expected_qty, l.counted_qty,
-          l.counted_by_name, dt(l.counted_at), l.recount_qty, l.recount_by_name, dt(l.recount_at), fin ?? 0, (fin ?? 0) - l.expected_qty,
+          'Formato',
+          l.key_value,
+          l.location,
+          l.sku,
+          l.description,
+          ...extraCols.map((c) => l.extra?.[c] ?? ''),
+          l.expected_qty,
+          l.counted_qty,
+          l.counted_by_name,
+          dt(l.counted_at),
+          l.recount_qty,
+          l.recount_by_name,
+          dt(l.recount_at),
+          fin ?? 0,
+          (fin ?? 0) - l.expected_qty,
           l.counted_qty === null ? (audit.status === 'cerrada' ? 'No encontrado' : 'Pendiente') : fin === l.expected_qty ? 'Cuadra' : 'Diferencia',
         ]
       })
       extras.forEach((x) =>
         rows.push([
-          'Sobrante', x.key_value, x.location, x.sku, x.description, ...extraCols.map(() => ''), 0, x.qty, x.created_by_name, dt(x.created_at),
-          '', '', '', x.qty, x.qty, 'Sobrante',
+          'Sobrante',
+          x.key_value,
+          x.location,
+          x.sku,
+          x.description,
+          ...extraCols.map(() => ''),
+          0,
+          x.qty,
+          x.created_by_name,
+          dt(x.created_at),
+          '',
+          '',
+          '',
+          x.qty,
+          x.qty,
+          'Sobrante',
         ]),
       )
       const csv = '﻿' + [head, ...rows].map((r) => r.map(q).join(';')).join('\r\n')
@@ -463,7 +593,26 @@ function Results({ auditId, canManage, onChange }: { auditId: string; canManage:
     }
   }
 
-  const shown = (skus ?? []).filter((s) => stateFilter === 'todos' || skuState(s) === stateFilter)
+  /** Coincidencias de la búsqueda dentro de las llaves de cada SKU (cuando no coincide el SKU mismo). */
+  const keyHits = useMemo(() => {
+    const m = new Map<string, number>()
+    if (!q) return m
+    for (const [sku, arr] of keysBySku) {
+      const n = arr.filter((k) => keyMatches(k, q)).length
+      if (n) m.set(sku, n)
+    }
+    return m
+  }, [keysBySku, q])
+  const skuMatches = (s: SkuSummary) => !q || normSearch(`${s.sku} ${s.description ?? ''}`).includes(q) || keyHits.has(s.sku)
+  const searchedSkus = (skus ?? []).filter(skuMatches)
+  const shown = searchedSkus
+    .filter((s) => stateFilter === 'todos' || skuState(s) === stateFilter)
+    .sort((a, b) =>
+      skuSort === 'pendientes'
+        ? b.lines_total - b.lines_counted - (a.lines_total - a.lines_counted) || a.sku.localeCompare(b.sku, 'es', { numeric: true })
+        : 0,
+    )
+  const pendingKeys = audit ? audit.line_count - audit.counted_lines : 0
   const states: SkuState[] = ['pendiente', 'contando', 'cuadra', 'discrepancia', 'reconteo', 'cuadrado', 'diferencia_confirmada']
 
   return (
@@ -483,9 +632,18 @@ function Results({ auditId, canManage, onChange }: { auditId: string; canManage:
             <Kpi
               label="Unidades contadas"
               value={fmtNum(audit.counted_units)}
-              sub={canManage ? `de ${fmtNum(audit.expected_total)} en el formato (${pctOf(audit.counted_units, audit.expected_total)}%)` : 'entre todos los contadores'}
+              sub={
+                canManage
+                  ? `de ${fmtNum(audit.expected_total)} en el formato (${pctOf(audit.counted_units, audit.expected_total)}%)`
+                  : 'entre todos los contadores'
+              }
             />
-            <Kpi label="SKU completos" value={`${stats.complete} / ${stats.total}`} sub={`${stats.ok} cuadran · ${stats.disc} en discrepancia`} dot="#4ade80" />
+            <Kpi
+              label="SKU completos"
+              value={`${stats.complete} / ${stats.total}`}
+              sub={`${stats.ok} cuadran · ${stats.disc} en discrepancia`}
+              dot="#4ade80"
+            />
             {canManage ? (
               <Kpi
                 label="Exactitud 1er conteo"
@@ -499,81 +657,171 @@ function Results({ auditId, canManage, onChange }: { auditId: string; canManage:
 
           <GlassCard className="p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="font-display text-sm font-semibold text-white">Avance por SKU</h3>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Chip color={C} active={mode === 'sku'} onClick={() => setMode('sku')}>
+                  Avance por SKU
+                </Chip>
+                <Chip color={C} active={mode === 'llave'} onClick={() => setMode('llave')}>
+                  Detalle por {audit.mapping.key_label} ({fmtNum(pendingKeys)} {audit.status === 'cerrada' ? 'sin contar' : 'pendientes'})
+                </Chip>
+              </div>
               {canManage ? (
                 <GhostButton onClick={exportCsv} disabled={exporting}>
                   {exporting ? 'Exportando…' : 'Exportar detalle (CSV)'}
                 </GhostButton>
               ) : null}
             </div>
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              <Chip color={C} active={stateFilter === 'todos'} onClick={() => setStateFilter('todos')}>
-                Todos ({skus.length})
-              </Chip>
-              {states.map((st) => {
-                const n = skus.filter((s) => skuState(s) === st).length
-                return n ? (
-                  <Chip key={st} color={SKU_STATE_COLORS[st]} active={stateFilter === st} onClick={() => setStateFilter(st)}>
-                    {SKU_STATE_LABELS[st]} ({n})
+            {mode === 'llave' ? (
+              <div className="mt-3">
+                {keys.error ? (
+                  <p className="text-sm text-rose-400">{keys.error}</p>
+                ) : !keys.data ? (
+                  <p className="text-sm text-white/45">Cargando {audit.mapping.key_label}…</p>
+                ) : (
+                  <KeyTable audit={audit} keys={keys.data} canManage={canManage} showSku initialQuery={query} />
+                )}
+              </div>
+            ) : (
+              <>
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <input
+                    type="search"
+                    className={`${fieldControlClass} basis-full sm:max-w-md sm:basis-auto flex-1`}
+                    style={ring}
+                    placeholder={`Buscar SKU, descripción, ${audit.mapping.key_label}${audit.mapping.location ? ' o ubicación' : ''}…`}
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                  />
+                  <span className="flex flex-wrap items-center gap-1.5 text-xs text-white/45">
+                    Ordenar:
+                    <Chip color={C} active={skuSort === 'sku'} onClick={() => setSkuSort('sku')}>
+                      SKU
+                    </Chip>
+                    <Chip color={C} active={skuSort === 'pendientes'} onClick={() => setSkuSort('pendientes')}>
+                      Más pendientes
+                    </Chip>
+                  </span>
+                </div>
+                {q && keys.error ? <p className="mt-1 text-xs text-rose-400">{keys.error}</p> : null}
+                {q && !keys.data && !keys.error ? <p className="mt-1 text-xs text-white/45">Buscando también en {audit.mapping.key_label}…</p> : null}
+                <div className="mt-3 flex flex-wrap gap-1.5">
+                  <Chip color={C} active={stateFilter === 'todos'} onClick={() => setStateFilter('todos')}>
+                    Todos ({searchedSkus.length})
                   </Chip>
-                ) : null
-              })}
-            </div>
-            <div className="mt-3 overflow-x-auto">
-              <table className="w-full min-w-[640px] text-sm">
-                <thead>
-                  <tr className="text-left text-[11px] tracking-wider text-white/45 uppercase">
-                    <th className="p-1.5">SKU</th>
-                    <th className="p-1.5">Avance {audit.mapping.key_label}</th>
-                    {canManage ? (
-                      <>
-                        <th className="p-1.5 text-right">Formato</th>
-                        <th className="p-1.5 text-right">Contado</th>
-                        <th className="p-1.5 text-right">Dif.</th>
-                      </>
-                    ) : null}
-                    <th className="p-1.5">Estado</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {shown.map((s) => {
-                    const st = skuState(s)
-                    // La diferencia solo se muestra con el SKU terminado: antes sería solo lo que falta por contar.
-                    const diff = (s.complete || closedAudit) && s.final_qty !== null && s.expected !== null ? s.final_qty - s.expected : null
-                    return (
-                      <tr key={s.sku} className="border-t border-neurale-border align-top text-white/80">
-                        <td className="p-1.5">
-                          <p className="font-medium text-white">{s.sku}</p>
-                          <p className="max-w-[16rem] truncate text-xs text-white/45">{s.description}</p>
-                        </td>
-                        <td className="p-1.5">
-                          <div className="w-36 space-y-1">
-                            <ProgressBar value={s.lines_counted} total={s.lines_total} color={SKU_STATE_COLORS[st]} thin />
-                            <p className="text-xs text-white/50 tabular-nums">
-                              {s.lines_counted}/{s.lines_total}
-                              {s.extra_lines ? ` +${s.extra_lines} sobr.` : ''}
-                            </p>
-                          </div>
-                        </td>
+                  {states.map((st) => {
+                    const n = searchedSkus.filter((s) => skuState(s) === st).length
+                    return n || stateFilter === st ? (
+                      <Chip key={st} color={SKU_STATE_COLORS[st]} active={stateFilter === st} onClick={() => setStateFilter(st)}>
+                        {SKU_STATE_LABELS[st]} ({n})
+                      </Chip>
+                    ) : null
+                  })}
+                </div>
+                <div className="mt-3 overflow-x-auto">
+                  <table className="w-full min-w-[640px] text-sm">
+                    <thead>
+                      <tr className="text-left text-[11px] tracking-wider text-white/45 uppercase">
+                        <th className="p-1.5">SKU</th>
+                        <th className="p-1.5">Avance {audit.mapping.key_label}</th>
                         {canManage ? (
                           <>
-                            <td className="p-1.5 text-right tabular-nums">{fmtNum(s.expected)}</td>
-                            <td className="p-1.5 text-right tabular-nums">{fmtNum(s.final_qty)}</td>
-                            <td className="p-1.5 text-right tabular-nums" style={{ color: !diff ? undefined : '#f87171' }}>
-                              {diff !== null && diff > 0 ? '+' : ''}
-                              {fmtNum(diff)}
-                            </td>
+                            <th className="p-1.5 text-right">Formato</th>
+                            <th className="p-1.5 text-right">Contado</th>
+                            <th className="p-1.5 text-right">Dif.</th>
                           </>
                         ) : null}
-                        <td className="p-1.5">
-                          <Badge color={SKU_STATE_COLORS[st]}>{SKU_STATE_LABELS[st]}</Badge>
-                        </td>
+                        <th className="p-1.5">Estado</th>
+                        <th className="w-6 p-1.5" aria-hidden />
                       </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody>
+                      {shown.map((s) => {
+                        const st = skuState(s)
+                        // La diferencia solo se muestra con el SKU terminado: antes sería solo lo que falta por contar.
+                        const diff = (s.complete || closedAudit) && s.final_qty !== null && s.expected !== null ? s.final_qty - s.expected : null
+                        const isOpen = expanded.has(s.sku)
+                        const hits = keyHits.get(s.sku)
+                        return (
+                          <Fragment key={s.sku}>
+                            <tr
+                              className="cursor-pointer border-t border-neurale-border align-top text-white/80 transition-colors hover:bg-white/[0.03]"
+                              style={isOpen ? { background: withAlpha(C, 0.06) } : undefined}
+                              onClick={() => toggleSku(s.sku)}
+                              aria-expanded={isOpen}
+                            >
+                              <td className="p-1.5">
+                                <p className="font-medium text-white">{s.sku}</p>
+                                <p className="max-w-[16rem] truncate text-xs text-white/45">{s.description}</p>
+                                {hits ? (
+                                  <p className="text-xs" style={{ color: C }}>
+                                    {hits} {audit.mapping.key_label} coinciden con la búsqueda
+                                  </p>
+                                ) : null}
+                              </td>
+                              <td className="p-1.5">
+                                <div className="w-36 space-y-1">
+                                  <ProgressBar value={s.lines_counted} total={s.lines_total} color={SKU_STATE_COLORS[st]} thin />
+                                  <p className="text-xs text-white/50 tabular-nums">
+                                    {s.lines_counted}/{s.lines_total}
+                                    {s.extra_lines ? ` +${s.extra_lines} sobr.` : ''}
+                                  </p>
+                                </div>
+                              </td>
+                              {canManage ? (
+                                <>
+                                  <td className="p-1.5 text-right tabular-nums">{fmtNum(s.expected)}</td>
+                                  <td className="p-1.5 text-right tabular-nums">{fmtNum(s.final_qty)}</td>
+                                  <td
+                                    className="p-1.5 text-right tabular-nums"
+                                    style={{
+                                      color: !diff ? undefined : '#f87171',
+                                    }}
+                                  >
+                                    {diff !== null && diff > 0 ? '+' : ''}
+                                    {fmtNum(diff)}
+                                  </td>
+                                </>
+                              ) : null}
+                              <td className="p-1.5">
+                                <Badge color={SKU_STATE_COLORS[st]}>{SKU_STATE_LABELS[st]}</Badge>
+                              </td>
+                              <td className="p-1.5 text-white/40" aria-hidden>
+                                <span className={`inline-block transition-transform ${isOpen ? 'rotate-90' : ''}`}>›</span>
+                              </td>
+                            </tr>
+                            {isOpen ? (
+                              <tr>
+                                <td
+                                  colSpan={canManage ? 7 : 4}
+                                  className="border-t border-neurale-border p-2 sm:p-3"
+                                  style={{ background: withAlpha(C, 0.03) }}
+                                >
+                                  {keys.error ? (
+                                    <p className="text-sm text-rose-400">{keys.error}</p>
+                                  ) : !keys.data ? (
+                                    <p className="text-sm text-white/45">Cargando {audit.mapping.key_label}…</p>
+                                  ) : (
+                                    <KeyTable
+                                      audit={audit}
+                                      keys={keysBySku.get(s.sku) ?? []}
+                                      canManage={canManage}
+                                      compact
+                                      initialQuery={hits && !normSearch(`${s.sku} ${s.description ?? ''}`).includes(q) ? query : ''}
+                                    />
+                                  )}
+                                </td>
+                              </tr>
+                            ) : null}
+                          </Fragment>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                  {!shown.length ? <p className="py-3 text-sm text-white/45">Ningún SKU coincide con los filtros.</p> : null}
+                  <p className="mt-2 text-xs text-white/40">Toca un SKU para ver sus {audit.mapping.key_label} y cuáles faltan por contar.</p>
+                </div>
+              </>
+            )}
           </GlassCard>
 
           <GlassCard className="p-4">
@@ -587,7 +835,8 @@ function Results({ auditId, canManage, onChange }: { auditId: string; canManage:
                     <span className="truncate text-white/80">{c.name}</span>
                     <ProgressBar value={c.lines} total={Math.max(...counters.data!.map((x) => x.lines), 1)} color={C} thin />
                     <span className="text-xs text-white/55 tabular-nums">
-                      {fmtNum(c.lines)} {audit.mapping.key_label} · {fmtNum(c.units)} u.{c.recounts ? ` · ${c.recounts} reconteos` : ''}
+                      {fmtNum(c.lines)} {audit.mapping.key_label} · {fmtNum(c.units)} u.
+                      {c.recounts ? ` · ${c.recounts} reconteos` : ''}
                       {c.extras ? ` · ${c.extras} sobr.` : ''}
                     </span>
                   </li>
