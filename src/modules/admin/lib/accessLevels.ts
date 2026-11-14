@@ -84,6 +84,7 @@ export const MODULE_VIEWS: Partial<Record<AccessDestination, ViewDef[]>> = {
     { id: 'ajustes', label: 'Ajustes de Storage' },
     { id: 'registro-pallet', label: 'Registro x Pallet' },
     { id: 'referencias', label: 'Control de Referencias' },
+    { id: 'auditoria-opl', label: 'Auditoría OPL' },
   ],
   picking: [
     { id: 'dialogo-tactico', label: 'Diálogo Táctico' },

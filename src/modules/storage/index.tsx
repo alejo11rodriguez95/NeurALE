@@ -11,6 +11,8 @@ import { ISQ_NAME } from '@/modules/storage/isq/lib/isq'
 import { canConfigureIsq } from '@/modules/storage/isq/ui'
 import { PALLETS_NAME, REFERENCES_NAME } from '@/modules/storage/pallets/lib/pallets'
 import { PalletRecordView, ReferenceControlView } from '@/modules/storage/pallets/PalletViews'
+import { OPL_NAME } from '@/modules/storage/opl/lib/opl'
+import { OplAuditView } from '@/modules/storage/opl/OplAuditView'
 import { useAuth } from '@/shared/auth/AuthContext'
 import { ModuleScreen } from '@/shared/components/ModuleScreen'
 import { MODULES } from '@/shared/modules'
@@ -26,6 +28,8 @@ const VIEWS = {
   /** Agregadas desde el chat del Dashboard Neuronal (v7 del Diálogo Táctico, 2026-09-29). */
   pallets: 'registro-pallet',
   references: 'referencias',
+  /** Auditoría OPL (chat de Storage, 2026-11-14): sub-navegación con &sec=, &opl=, &audit=. */
+  opl: 'auditoria-opl',
 } as const
 
 /**
@@ -55,6 +59,7 @@ export default function StorageModule() {
   const settingsDenied = isViewDenied(adminUser, 'storage', VIEWS.settings)
   const palletsDenied = isViewDenied(adminUser, 'storage', VIEWS.pallets)
   const referencesDenied = isViewDenied(adminUser, 'storage', VIEWS.references)
+  const oplDenied = isViewDenied(adminUser, 'storage', VIEWS.opl)
 
   function goTo(next: string | null) {
     if (next) setParams({ view: next })
@@ -75,6 +80,7 @@ export default function StorageModule() {
           {view === VIEWS.dash ? (dashDenied ? <NoAccess /> : <IsqDashboard color={moduleDef.color} />) : null}
           {view === VIEWS.pallets ? (palletsDenied ? <NoAccess /> : <PalletRecordView />) : null}
           {view === VIEWS.references ? (referencesDenied ? <NoAccess /> : <ReferenceControlView side="storage" />) : null}
+          {view === VIEWS.opl ? (oplDenied ? <NoAccess /> : <OplAuditView />) : null}
           {view === VIEWS.settings ? (
             canConfigure && !settingsDenied ? <StorageSettingsHome onNavigate={goTo} /> : <NoAccess />
           ) : null}
@@ -109,6 +115,15 @@ export default function StorageModule() {
               title={REFERENCES_NAME}
               description="Total de pallets almacenados por referencia. Marca ALMACENADO la referencia terminada para que Inbound la actualice."
               onClick={() => goTo(VIEWS.references)}
+            />
+          ) : null}
+          {!oplDenied ? (
+            <OptionCard
+              color={moduleDef.color}
+              icon="🔎"
+              title={OPL_NAME}
+              description="Audita el inventario de los operadores logísticos (ej. TLA) con su Excel: conteo por LPN con la cámara del celular, discrepancias y resultados."
+              onClick={() => goTo(VIEWS.opl)}
             />
           ) : null}
           {!dashDenied ? (
